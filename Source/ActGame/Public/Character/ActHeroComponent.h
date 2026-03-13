@@ -1,0 +1,87 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "Components/GameFrameworkInitStateInterface.h"
+#include "Components/PawnComponent.h"
+#include "Input/ActInputConfig.h"
+
+#include "ActHeroComponent.generated.h"
+
+#define UE_API ACTGAME_API
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDataAvailableDelegate);
+
+class UGameFrameworkComponentManager;
+class UInputComponent;
+class UInputMappingContext;
+class UActInputConfig;
+class UObject;
+struct FActorInitStateChangedParams;
+struct FFrame;
+struct FGameplayTag;
+struct FInputActionValue;
+
+/**
+ * Component that sets up input and camera handling for player controlled pawns (or bots that simulate players).
+ * This depends on a PawnExtensionComponent to coordinate initialization.
+ */
+UCLASS(MinimalAPI, Blueprintable, Meta=(BlueprintSpawnableComponent))
+class UActHeroComponent : public UPawnComponent, public IGameFrameworkInitStateInterface
+{
+	GENERATED_BODY()
+
+public:
+	
+	UE_API UActHeroComponent(const FObjectInitializer& ObjectInitializer);
+
+	/** Returns the battle component if one exists on the specified actor. */
+	UFUNCTION(BlueprintPure, Category="Act|Battle")
+	static UActHeroComponent* FindBattleComponent(const AActor* Actor){ return (Actor ? Actor->FindComponentByClass<UActHeroComponent>() : nullptr);}
+
+	/** True if this is controlled by a real player and has progressed far enough in initialization where additional input bindings can be added */
+	UE_API bool IsReadyToBindInputs() const;
+	
+	//~ Begin IGameFrameworkInitStateInterface interface
+	virtual FName GetFeatureName() const override { return NAME_ActorFeatureName; }
+	UE_API virtual bool CanChangeInitState(UGameFrameworkComponentManager* Manager, FGameplayTag CurrentState, FGameplayTag DesiredState) const override;
+	UE_API virtual void HandleChangeInitState(UGameFrameworkComponentManager* Manager, FGameplayTag CurrentState, FGameplayTag DesiredState) override;
+	UE_API virtual void OnActorInitStateChanged(const FActorInitStateChangedParams& Params) override;
+	UE_API virtual void CheckDefaultInitialization() override;
+	//~ End IGameFrameworkInitStateInterface interface
+	
+protected:
+
+	UE_API virtual void OnRegister() override;
+	UE_API virtual void BeginPlay() override;
+	UE_API virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
+	UE_API void InitializePlayerInput(UInputComponent* PlayerInputComponent);
+ 
+	UE_API void Input_AbilityInputTagPressed(FGameplayTag InputTag);
+	UE_API void Input_AbilityInputTagReleased(FGameplayTag InputTag);
+
+	UE_API void Input_Move(const FInputActionValue& InputActionValue);
+	UE_API void Input_LookMouse(const FInputActionValue& InputActionValue);
+
+public:
+	
+	/** The name of the extension event sent via UGameFrameworkComponentManager when ability inputs are ready to bind */
+	static UE_API const FName NAME_BindInputsNow;
+
+	/** The name of this component-implemented feature */
+	static UE_API const FName NAME_ActorFeatureName;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnDataAvailableDelegate OnDataAvailable;
+
+protected:
+	
+	UPROPERTY(EditAnywhere, Category = "Act|Input")
+	TObjectPtr<UInputMappingContext> DefaultInputMapping;
+
+	/** True when player input bindings have been applied, will never be true for non - players */
+	bool bReadyToBindInputs;
+};
+
+#undef UE_API

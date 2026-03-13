@@ -1,0 +1,52 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "ModularGameMode.h"
+
+#include "ActGameMode.generated.h"
+
+#define UE_API ACTGAME_API
+
+class AActor;
+class AController;
+class UActPawnData;
+class UActExperienceDefinition;
+
+/**
+ * AActGameMode
+ *
+ *	The base game mode class used by this project.
+ */
+UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "The base game mode class used by this project."))
+class AActGameMode : public AModularGameModeBase
+{
+	GENERATED_BODY()
+
+public:
+	
+	UE_API AActGameMode(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	UFUNCTION(BlueprintCallable, Category = "Act|Pawn")
+	UE_API const UActPawnData* GetPawnDataForController(const AController* InController) const;
+	
+	//~AGameModeBase interface
+	UE_API virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+	UE_API virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
+	UE_API virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
+	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	UE_API virtual void InitGameState() override;
+	//~End of AGameModeBase interface
+
+protected:
+	UE_API void OnExperienceLoaded(const UActExperienceDefinition* CurrentExperience);
+	UE_API bool IsExperienceLoaded() const;
+	
+	UE_API void HandleMatchAssignmentIfNotExpectingOne();
+
+	UE_API void OnMatchAssignmentGiven(const FPrimaryAssetId& ExperienceId, const FString& ExperienceIdSource) const;
+	
+	UE_API bool TryDedicatedServerLogin();
+};
+
+#undef UE_API
