@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayAbilitySpecHandle.h"
 #include "GameplayTagContainer.h"
-#include "Input/ActAbilityChainTypes.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainTypes.h"
 
 class UActAbilitySystemComponent;
 

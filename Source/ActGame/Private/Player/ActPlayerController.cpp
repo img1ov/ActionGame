@@ -61,6 +61,13 @@ void AActPlayerController::PostProcessInput(const float DeltaTime, const bool bG
 
 		ActASC->ProcessAbilityInput(DeltaTime, bGamePaused);
 	}
+	else
+	{
+		// Defensive: avoid carrying stale input across frames when ASC is unavailable.
+		PendingAbilityInputPressed.Reset();
+		PendingAbilityInputReleased.Reset();
+		bCommandMatchedThisFrame = false;
+	}
 
 	Super::PostProcessInput(DeltaTime, bGamePaused);
 }

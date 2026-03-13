@@ -2,6 +2,7 @@
 
 #include "Input/ActCommandRuntimeResolver.h"
 
+#include "ActLogChannels.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 
@@ -35,11 +36,13 @@ void FActCommandRuntimeResolver::RegisterAbilityChainWindow(
 
 	TArray<FActAbilityChainEntry> ValidEntries;
 	ValidEntries.Reserve(ChainEntries.Num());
+	int32 SkippedEntries = 0;
 
 	for (const FActAbilityChainEntry& Entry : ChainEntries)
 	{
 		if (!Entry.CommandTag.IsValid() || Entry.AbilityID.IsNone())
 		{
+			++SkippedEntries;
 			continue;
 		}
 
@@ -48,7 +51,17 @@ void FActCommandRuntimeResolver::RegisterAbilityChainWindow(
 
 	if (ValidEntries.IsEmpty())
 	{
+		if (SkippedEntries > 0)
+		{
+			UE_LOG(LogActAbilitySystem, Verbose, TEXT("AbilityChain window [%s] skipped %d invalid entries; no valid entries remain."),
+				*WindowId.ToString(), SkippedEntries);
+		}
 		return;
+	}
+	if (SkippedEntries > 0)
+	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("AbilityChain window [%s] skipped %d invalid entries."),
+			*WindowId.ToString(), SkippedEntries);
 	}
 
 	ActiveChainWindows.Add(WindowId, ValidEntries);
@@ -206,6 +219,8 @@ bool FActCommandRuntimeResolver::TryExecuteCommand(UActAbilitySystemComponent& A
 	FName StarterAbilityId;
 	if (!ActASC.GetAbilityIdByInputTag(CommandTag, StarterAbilityId))
 	{
+		UE_LOG(LogActAbilitySystem, VeryVerbose, TEXT("TryExecuteCommand: No ability mapped for command tag [%s]."),
+			*CommandTag.ToString());
 		return false;
 	}
 

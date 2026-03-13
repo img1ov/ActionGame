@@ -1,6 +1,6 @@
 // Copyright
 
-#include "Animation/AN_AbilityChainReset.h"
+#include "AbilitySystem/AbilityChain/AN_AbilityChainReset.h"
 
 #include "Player/ActPlayerController.h"
 #include "GameFramework/Pawn.h"

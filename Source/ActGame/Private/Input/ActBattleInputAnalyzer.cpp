@@ -149,27 +149,44 @@ void FActBattleInputAnalyzer::AddInputEntry(const FInputHistoryEntry& InputEntry
 
 void FActBattleInputAnalyzer::PruneExpiredInputHistory(const double CurrentTimeSeconds)
 {
-	TArray<FInputHistoryEntry> Entries;
-	InputHistory.ToArray(Entries, true);
-	if (Entries.IsEmpty())
+	if (InputHistory.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 NumItems = InputHistory.Num();
+	FInputHistoryEntry KeptEntries[InputHistoryCapacity];
+	int32 KeptCount = 0;
+
+	for (int32 Index = 0; Index < NumItems; ++Index)
+	{
+		const FInputHistoryEntry& Entry = InputHistory.GetOldest(Index);
+		// Keep recent samples only. This avoids stale inputs affecting a later command.
+		if ((CurrentTimeSeconds - Entry.InputTimeSeconds) <= InputHistoryMaxAgeSeconds)
+		{
+			KeptEntries[KeptCount++] = Entry;
+		}
+	}
+
+	if (KeptCount == NumItems)
 	{
 		return;
 	}
 
 	InputHistory.Reset();
-	for (const FInputHistoryEntry& Entry : Entries)
+	for (int32 Index = 0; Index < KeptCount; ++Index)
 	{
-		// Keep recent samples only. This avoids stale inputs affecting a later command.
-		if ((CurrentTimeSeconds - Entry.InputTimeSeconds) <= InputHistoryMaxAgeSeconds)
-		{
-			InputHistory.Add(Entry);
-		}
+		InputHistory.Add(KeptEntries[Index]);
 	}
 }
 
 void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestEntry)
 {
 	if (InputHistory.IsEmpty())
+	{
+		return;
+	}
+	if (CommandDefinitions.IsEmpty())
 	{
 		return;
 	}
@@ -184,9 +201,16 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 
 	FMatchCandidate BestMatch;
 
+	const int32 HistoryNum = InputHistory.Num();
 	for (const FInputCommandDefinition& CommandDefinition : CommandDefinitions)
 	{
-		if (!CommandDefinition.OutputCommandTag.IsValid() || CommandDefinition.Steps.IsEmpty())
+		if (!CommandDefinition.OutputCommandTag.IsValid())
+		{
+			continue;
+		}
+
+		const int32 StepCount = CommandDefinition.Steps.Num();
+		if (StepCount == 0)
 		{
 			continue;
 		}
@@ -204,10 +228,10 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 			continue;
 		}
 
-		int32 StepIndex = CommandDefinition.Steps.Num() - 1;
+		int32 StepIndex = StepCount - 1;
 		double LastMatchedTimeSeconds = -1.0;
 
-		for (int32 OffsetFromLatest = 0; OffsetFromLatest < InputHistory.Num() && StepIndex >= 0; ++OffsetFromLatest)
+		for (int32 OffsetFromLatest = 0; OffsetFromLatest < HistoryNum && StepIndex >= 0; ++OffsetFromLatest)
 		{
 			const FInputHistoryEntry& Entry = InputHistory.GetLatest(OffsetFromLatest);
 			const FInputCommandStep& Step = CommandDefinition.Steps[StepIndex];
@@ -229,11 +253,11 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 		}
 
 		if (CommandDefinition.Priority > BestMatch.Priority ||
-			(CommandDefinition.Priority == BestMatch.Priority && CommandDefinition.Steps.Num() > BestMatch.StepCount))
+			(CommandDefinition.Priority == BestMatch.Priority && StepCount > BestMatch.StepCount))
 		{
 			BestMatch.CommandTag = CommandDefinition.OutputCommandTag;
 			BestMatch.Priority = CommandDefinition.Priority;
-			BestMatch.StepCount = CommandDefinition.Steps.Num();
+			BestMatch.StepCount = StepCount;
 			BestMatch.BufferLifetimeSeconds = FMath::Max(0.0, CommandDefinition.BufferLifetimeSeconds);
 		}
 	}

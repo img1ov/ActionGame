@@ -584,8 +584,6 @@ void UActAbilitySystemComponent::ClearAbilityInput()
 	InputHeldSpecHandles.Reset();
 }
 
-
-
 bool UActAbilitySystemComponent::IsActivationGroupBlocked(EActAbilityActivationGroup Group) const
 {
 	bool bBlocked = false;

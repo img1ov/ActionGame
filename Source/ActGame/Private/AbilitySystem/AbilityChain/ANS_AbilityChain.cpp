@@ -1,6 +1,6 @@
 // Copyright
 
-#include "Animation/ANS_AbilityChain.h"
+#include "AbilitySystem/AbilityChain/ANS_AbilityChain.h"
 
 #include "Player/ActPlayerController.h"
 #include "GameFramework/Pawn.h"

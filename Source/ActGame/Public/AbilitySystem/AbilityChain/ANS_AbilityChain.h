@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
-#include "Input/ActAbilityChainTypes.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainTypes.h"
 
 #include "ANS_AbilityChain.generated.h"
 
