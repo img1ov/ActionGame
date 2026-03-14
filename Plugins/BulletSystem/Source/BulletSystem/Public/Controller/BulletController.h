@@ -17,8 +17,10 @@ class UBulletTraceElementPool;
 class UBulletConfigSubsystem;
 class UBulletConfig;
 class ABulletActor;
+class AActor;
 class UWorld;
 struct FBulletInfo;
+struct FHitResult;
 
 UCLASS()
 class BULLETSYSTEM_API UBulletController : public UObject
@@ -39,6 +41,12 @@ public:
     void EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo);
     void RequestDestroyBullet(int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren);
     void MarkBulletForDestroy(int32 BulletId);
+
+    bool SetCollisionEnabled(int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors);
+    bool ResetHitActors(int32 BulletId);
+    int32 ApplyDamageToOverlaps(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
+
+    bool HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse);
 
     void RequestSummonChildren(const FBulletInfo& ParentInfo);
     void SpawnChildBulletsFromLogic(const FBulletInfo& ParentInfo, FName ChildRowName, int32 Count, float SpreadAngle);

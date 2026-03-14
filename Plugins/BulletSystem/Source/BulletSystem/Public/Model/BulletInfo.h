@@ -58,6 +58,9 @@ struct FBulletCollisionInfo
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
+    bool bCollisionEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
     int32 HitCount = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
@@ -67,6 +70,7 @@ struct FBulletCollisionInfo
     bool bHitThisFrame = false;
 
     TArray<TWeakObjectPtr<AActor>> HitActors;
+    TSet<TWeakObjectPtr<AActor>> OverlapActors;
 };
 
 USTRUCT(BlueprintType)

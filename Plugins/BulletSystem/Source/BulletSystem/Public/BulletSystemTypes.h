@@ -24,6 +24,14 @@ enum class EBulletShapeType : uint8
 };
 
 UENUM(BlueprintType)
+enum class EBulletConfigProfile : uint8
+{
+    HitBox,
+    Projectile,
+    Custom
+};
+
+UENUM(BlueprintType)
 enum class EBulletMoveType : uint8
 {
     Straight,
@@ -96,6 +104,20 @@ enum class EBulletCollisionResponse : uint8
     Pierce
 };
 
+UENUM(BlueprintType)
+enum class EBulletCollisionMode : uint8
+{
+    Sweep,
+    Overlap
+};
+
+UENUM(BlueprintType)
+enum class EBulletHitTrigger : uint8
+{
+    Auto,
+    Manual
+};
+
 USTRUCT(BlueprintType)
 struct FBulletDataBase
 {
@@ -107,16 +129,16 @@ struct FBulletDataBase
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
     EBulletShapeType Shape = EBulletShapeType::Sphere;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0", EditCondition = "Shape == EBulletShapeType::Sphere"))
     float SphereRadius = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (EditCondition = "Shape == EBulletShapeType::Box"))
     FVector BoxExtent = FVector(10.0f, 10.0f, 10.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0", EditCondition = "Shape == EBulletShapeType::Capsule"))
     float CapsuleRadius = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base", meta = (ClampMin = "0", EditCondition = "Shape == EBulletShapeType::Capsule"))
     float CapsuleHalfHeight = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
@@ -127,6 +149,15 @@ struct FBulletDataBase
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
     EBulletCollisionResponse CollisionResponse = EBulletCollisionResponse::Destroy;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
+    EBulletCollisionMode CollisionMode = EBulletCollisionMode::Sweep;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
+    EBulletHitTrigger HitTrigger = EBulletHitTrigger::Auto;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
+    bool bCollisionEnabledOnSpawn = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
     TEnumAsByte<ECollisionChannel> CollisionChannel = ECC_WorldDynamic;
@@ -155,7 +186,7 @@ struct FBulletDataAimed
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aimed")
     bool bUseAim = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aimed", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aimed", meta = (ClampMin = "0", EditCondition = "bUseAim"))
     float AimAngleTolerance = 5.0f;
 };
 
@@ -173,7 +204,7 @@ struct FBulletDataMove
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     FVector InitialVelocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (EditCondition = "MoveType == EBulletMoveType::Parabola"))
     float Gravity = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
@@ -183,15 +214,21 @@ struct FBulletDataMove
     bool bUseSpawnTransform = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    FVector SpawnOffset = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    bool bSpawnOffsetInOwnerSpace = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (EditCondition = "MoveType == EBulletMoveType::Straight || MoveType == EBulletMoveType::FixedDuration"))
     bool bHoming = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0", EditCondition = "bHoming && (MoveType == EBulletMoveType::Straight || MoveType == EBulletMoveType::FixedDuration)"))
     float HomingAcceleration = 8000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0", EditCondition = "MoveType == EBulletMoveType::Orbit"))
     float OrbitRadius = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0", EditCondition = "MoveType == EBulletMoveType::Orbit"))
     float OrbitAngularSpeed = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
@@ -227,7 +264,7 @@ struct FBulletDataTimeScale
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "TimeScale")
     float TimeDilation = 1.0f;
 };
 
@@ -272,25 +309,25 @@ struct FBulletDataChild
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     FName ChildRowName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (ClampMin = "0"))
     int32 Count = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (ClampMin = "0"))
     float SpreadAngle = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bInheritOwner = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bInheritTarget = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bSpawnOnDestroy = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Child")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bSpawnOnHit = false;
 };
 
@@ -302,7 +339,7 @@ struct FBulletDataObstacle
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Obstacle")
     bool bEnableObstacle = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Obstacle", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Obstacle", meta = (ClampMin = "0", EditCondition = "bEnableObstacle"))
     float ObstacleTraceRadius = 0.0f;
 };
 
@@ -314,7 +351,7 @@ struct FBulletDataInteract
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact")
     bool bEnableInteract = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact", meta = (EditCondition = "bEnableInteract"))
     bool bAffectEnvironment = false;
 };
 
@@ -327,39 +364,42 @@ struct FBulletDataMain : public FTableRowBase
     FName RowName;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    EBulletConfigProfile ConfigProfile = EBulletConfigProfile::Projectile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
     FBulletDataBase Base;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
     FBulletDataLogic Logic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aimed")
     FBulletDataAimed Aimed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     FBulletDataMove Move;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Render")
     FBulletDataRender Render;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "TimeScale")
     FBulletDataTimeScale TimeScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Execution")
     FBulletDataExecution Execution;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scale")
     FBulletDataScale Scale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summon")
     FBulletDataSummon Summon;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     FBulletDataChild Children;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Obstacle")
     FBulletDataObstacle Obstacle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact")
     FBulletDataInteract Interact;
 
     bool CheckSimpleBullet() const

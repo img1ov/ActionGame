@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Actor.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 
@@ -223,6 +224,125 @@ void UBulletController::MarkBulletForDestroy(int32 BulletId)
     }
 }
 
+bool UBulletController::SetCollisionEnabled(int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors)
+{
+    if (!Model)
+    {
+        return false;
+    }
+
+    FBulletInfo* Info = Model->GetBullet(BulletId);
+    if (!Info)
+    {
+        return false;
+    }
+
+    Info->CollisionInfo.bCollisionEnabled = bEnabled;
+
+    if (!bEnabled && bClearOverlaps)
+    {
+        Info->CollisionInfo.OverlapActors.Reset();
+    }
+
+    if (bResetHitActors)
+    {
+        Info->CollisionInfo.HitActors.Reset();
+        Info->CollisionInfo.HitCount = 0;
+        Info->CollisionInfo.LastHitTime = 0.0f;
+    }
+
+    return true;
+}
+
+bool UBulletController::ResetHitActors(int32 BulletId)
+{
+    if (!Model)
+    {
+        return false;
+    }
+
+    FBulletInfo* Info = Model->GetBullet(BulletId);
+    if (!Info)
+    {
+        return false;
+    }
+
+    Info->CollisionInfo.HitActors.Reset();
+    Info->CollisionInfo.HitCount = 0;
+    Info->CollisionInfo.LastHitTime = 0.0f;
+    return true;
+}
+
+int32 UBulletController::ApplyDamageToOverlaps(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
+{
+    if (!Model)
+    {
+        return 0;
+    }
+
+    FBulletInfo* Info = Model->GetBullet(BulletId);
+    if (!Info || Info->bNeedDestroy)
+    {
+        return 0;
+    }
+
+    if (!Info->CollisionInfo.bCollisionEnabled)
+    {
+        return 0;
+    }
+
+    if (bResetHitActorsBefore)
+    {
+        Info->CollisionInfo.HitActors.Reset();
+        Info->CollisionInfo.HitCount = 0;
+        Info->CollisionInfo.LastHitTime = 0.0f;
+    }
+
+    if (Info->CollisionInfo.OverlapActors.Num() == 0)
+    {
+        return 0;
+    }
+
+    const float WorldTime = GetWorldTimeSeconds();
+    int32 AppliedCount = 0;
+
+    for (const TWeakObjectPtr<AActor>& ActorPtr : Info->CollisionInfo.OverlapActors)
+    {
+        AActor* HitActor = ActorPtr.Get();
+        if (!HitActor)
+        {
+            continue;
+        }
+
+        if (Info->CollisionInfo.HitActors.Contains(HitActor))
+        {
+            continue;
+        }
+
+        Info->CollisionInfo.HitActors.Add(HitActor);
+        Info->CollisionInfo.HitCount++;
+        Info->CollisionInfo.LastHitTime = WorldTime;
+        Info->CollisionInfo.bHitThisFrame = true;
+
+        const FVector HitLocation = HitActor->GetActorLocation();
+        const FVector HitNormal = (HitLocation - Info->MoveInfo.Location).GetSafeNormal();
+        FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
+        Hit.Location = HitLocation;
+        Hit.ImpactPoint = HitLocation;
+        Hit.TraceStart = Info->MoveInfo.Location;
+        Hit.TraceEnd = Info->MoveInfo.Location;
+
+        const bool bDestroyed = HandleHitResult(*Info, HitActor, Hit, bApplyCollisionResponse);
+        AppliedCount++;
+        if (bDestroyed)
+        {
+            break;
+        }
+    }
+
+    return AppliedCount;
+}
+
 void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo)
 {
     const FBulletDataChild& ChildData = ParentInfo.Config.Children;
@@ -331,6 +451,69 @@ float UBulletController::GetWorldTimeSeconds() const
 bool UBulletController::IsDebugDrawEnabled() const
 {
     return bEnableDebugDraw;
+}
+
+bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse)
+{
+    if (Info.Entity && Info.Entity->GetLogicComponent())
+    {
+        Info.Entity->GetLogicComponent()->HandleOnHit(Info, Hit);
+
+        if (HitActor && HitActor->IsA<ABulletActor>())
+        {
+            const int32 OtherBulletId = FindBulletIdByActor(HitActor);
+            if (OtherBulletId != INDEX_NONE)
+            {
+                Info.Entity->GetLogicComponent()->HandleOnHitBullet(Info, OtherBulletId);
+            }
+        }
+    }
+
+    if (Info.Config.Children.bSpawnOnHit)
+    {
+        RequestSummonChildren(Info);
+    }
+
+    if (!bApplyCollisionResponse)
+    {
+        return false;
+    }
+
+    const bool bHitLimitReached = Info.CollisionInfo.HitCount >= Info.Config.Base.MaxHitCount;
+    const bool bDestroyOnHit = Info.Config.Base.bDestroyOnHit || bHitLimitReached;
+
+    if (Info.Config.Base.Shape == EBulletShapeType::Ray)
+    {
+        Info.RayInfo.TraceStart = Hit.TraceStart;
+        Info.RayInfo.TraceEnd = Hit.TraceEnd;
+    }
+
+    switch (Info.Config.Base.CollisionResponse)
+    {
+    case EBulletCollisionResponse::Destroy:
+        if (bDestroyOnHit)
+        {
+            RequestDestroyBullet(Info.BulletId, EBulletDestroyReason::Hit, true);
+            return true;
+        }
+        break;
+    case EBulletCollisionResponse::Bounce:
+        if (!Hit.ImpactNormal.IsNearlyZero())
+        {
+            const FVector Reflected = FMath::GetReflectionVector(Info.MoveInfo.Velocity, Hit.ImpactNormal);
+            Info.MoveInfo.Velocity = Reflected;
+            if (Info.Entity && Info.Entity->GetLogicComponent())
+            {
+                Info.Entity->GetLogicComponent()->HandleOnRebound(Info, Hit);
+            }
+        }
+        break;
+    case EBulletCollisionResponse::Pierce:
+    default:
+        break;
+    }
+
+    return false;
 }
 
 void UBulletController::FlushDestroyedBullets()

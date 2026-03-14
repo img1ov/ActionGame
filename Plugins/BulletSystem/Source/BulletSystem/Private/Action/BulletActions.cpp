@@ -74,6 +74,13 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
         SpawnRotation = BulletInfo.InitParams.Owner->GetActorRotation();
     }
 
+    FVector ConfigOffset = BulletInfo.Config.Move.SpawnOffset;
+    if (BulletInfo.Config.Move.bSpawnOffsetInOwnerSpace)
+    {
+        ConfigOffset = SpawnRotation.RotateVector(ConfigOffset);
+    }
+
+    SpawnLocation += ConfigOffset;
     SpawnLocation += BulletInfo.InitParams.SpawnOffset;
 
     FVector Direction = SpawnRotation.Vector();
@@ -111,6 +118,8 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
     BulletInfo.CollisionInfo.HitActors.Reset();
     BulletInfo.CollisionInfo.HitCount = 0;
     BulletInfo.CollisionInfo.LastHitTime = 0.0f;
+    BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
+    BulletInfo.CollisionInfo.OverlapActors.Reset();
 }
 
 void UBulletActionInitRender::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)

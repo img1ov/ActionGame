@@ -21,4 +21,13 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
     static bool IsBulletValid(const UObject* WorldContextObject, int32 BulletId);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
+    static bool SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
+    static bool ResetBulletHitActors(const UObject* WorldContextObject, int32 BulletId);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
+    static int32 ApplyDamageToOverlaps(const UObject* WorldContextObject, int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
 };
