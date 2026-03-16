@@ -233,10 +233,20 @@ bool UBulletController::CreateBulletByData(const FBulletInitParams& InitParams, 
 
 void UBulletController::EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const
 {
-    if (ActionRunner)
+    if (!ActionRunner)
     {
-        ActionRunner->EnqueueAction(BulletId, ActionInfo);
+        return;
     }
+
+    if (ActionCenter)
+    {
+        FBulletActionInfo PooledInfo = ActionCenter->AcquireActionInfo();
+        PooledInfo = ActionInfo;
+        ActionRunner->EnqueueAction(BulletId, PooledInfo);
+        return;
+    }
+
+    ActionRunner->EnqueueAction(BulletId, ActionInfo);
 }
 
 void UBulletController::RequestDestroyBullet(int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren) const

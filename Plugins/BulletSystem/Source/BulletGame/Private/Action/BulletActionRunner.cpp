@@ -41,6 +41,11 @@ void UBulletActionRunner::EnqueueAction(int32 BulletId, const FBulletActionInfo&
         return;
     }
 
+    if (ClearingBullets.Contains(BulletId))
+    {
+        return;
+    }
+
     if (State == EBulletActionRunnerState::Running)
     {
         Info->NextActionInfoList.Add(ActionInfo);
@@ -144,6 +149,10 @@ void UBulletActionRunner::ClearBulletActions(int32 BulletId)
         return;
     }
 
+    const EBulletActionRunnerState PrevState = State;
+    State = EBulletActionRunnerState::ClearBullet;
+    ClearingBullets.Add(BulletId);
+
     if (FBulletActionList* Actions = PersistentActions.Find(BulletId))
     {
         for (UBulletActionBase* Action : Actions->Actions)
@@ -152,6 +161,26 @@ void UBulletActionRunner::ClearBulletActions(int32 BulletId)
         }
         PersistentActions.Remove(BulletId);
     }
+
+    if (UBulletModel* Model = Controller ? Controller->GetModel() : nullptr)
+    {
+        if (FBulletInfo* Info = Model->GetBullet(BulletId))
+        {
+            for (const FBulletActionInfo& ActionInfo : Info->ActionInfoList)
+            {
+                ActionCenter->ReleaseActionInfo(ActionInfo);
+            }
+            for (const FBulletActionInfo& ActionInfo : Info->NextActionInfoList)
+            {
+                ActionCenter->ReleaseActionInfo(ActionInfo);
+            }
+            Info->ActionInfoList.Reset();
+            Info->NextActionInfoList.Reset();
+        }
+    }
+
+    ClearingBullets.Remove(BulletId);
+    State = PrevState;
 }
 
 void UBulletActionRunner::ProcessActionList(FBulletInfo& BulletInfo, TArray<FBulletActionInfo>& ActionList)

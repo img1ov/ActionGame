@@ -64,6 +64,8 @@ private:
     UPROPERTY()
     TMap<int32, FBulletActionList> PersistentActions;
 
+    TSet<int32> ClearingBullets;
+
     EBulletActionRunnerState State = EBulletActionRunnerState::Idle;
 };
 

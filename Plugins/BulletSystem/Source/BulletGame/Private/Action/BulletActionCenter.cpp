@@ -51,7 +51,9 @@ FBulletActionInfo UBulletActionCenter::AcquireActionInfo()
 {
     if (ActionInfoPool.Num() > 0)
     {
-        return ActionInfoPool.Pop(EAllowShrinking::No);
+        FBulletActionInfo Info = ActionInfoPool.Pop(EAllowShrinking::No);
+        Info = FBulletActionInfo();
+        return Info;
     }
 
     return FBulletActionInfo();
@@ -59,7 +61,7 @@ FBulletActionInfo UBulletActionCenter::AcquireActionInfo()
 
 void UBulletActionCenter::ReleaseActionInfo(const FBulletActionInfo& ActionInfo)
 {
-    (void)ActionInfo;
+    ActionInfoPool.Add(ActionInfo);
 }
 
 UClass* UBulletActionCenter::GetActionClass(EBulletActionType ActionType) const
