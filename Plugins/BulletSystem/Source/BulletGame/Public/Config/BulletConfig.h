@@ -17,16 +17,21 @@ class BULLETGAME_API UBulletConfig : public UDataAsset
 
 public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
-    TObjectPtr<UDataTable> BulletDataTable;
+    TArray<TObjectPtr<UDataTable>> BulletDataTables;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
     TArray<FBulletDataMain> InlineBulletData;
 
     bool GetBulletData(FName BulletID, FBulletDataMain& OutData) const;
+    void RebuildRuntimeTable() const;
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+private:
+    mutable TMap<FName, FBulletDataMain> RuntimeTable;
+    mutable bool bRuntimeTableDirty = true;
 };
 
 USTRUCT()

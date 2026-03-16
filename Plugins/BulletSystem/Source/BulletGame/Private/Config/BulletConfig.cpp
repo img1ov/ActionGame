@@ -12,31 +12,85 @@
 
 bool UBulletConfig::GetBulletData(FName BulletID, FBulletDataMain& OutData) const
 {
-    if (!BulletID.IsNone() && BulletDataTable)
+    if (BulletID.IsNone())
     {
-        TArray<FBulletDataMain*> Rows;
-        BulletDataTable->GetAllRows(TEXT("BulletConfig"), Rows);
-        for (const FBulletDataMain* Row : Rows)
+        return false;
+    }
+
+    if (bRuntimeTableDirty)
+    {
+        RebuildRuntimeTable();
+    }
+
+    if (const FBulletDataMain* Found = RuntimeTable.Find(BulletID))
+    {
+        OutData = *Found;
+        OutData.BulletID = BulletID;
+        return true;
+    }
+
+    return false;
+}
+
+void UBulletConfig::RebuildRuntimeTable() const
+{
+    RuntimeTable.Reset();
+    bRuntimeTableDirty = false;
+
+    for (UDataTable* Table : BulletDataTables)
+    {
+        if (!Table)
         {
-            if (Row && Row->BulletID == BulletID)
+            continue;
+        }
+
+        if (Table->GetRowStruct() != FBulletDataMain::StaticStruct())
+        {
+            UE_LOG(LogBullet, Warning, TEXT("BulletConfig: DataTable '%s' row struct mismatch (expected FBulletDataMain). Skipped."), *Table->GetName());
+            continue;
+        }
+
+        const TMap<FName, uint8*>& RowMap = Table->GetRowMap();
+        for (const TPair<FName, uint8*>& Pair : RowMap)
+        {
+            const FName RowName = Pair.Key;
+            const FBulletDataMain* Row = reinterpret_cast<const FBulletDataMain*>(Pair.Value);
+            if (!Row)
             {
-                OutData = *Row;
-                OutData.BulletID = BulletID;
-                return true;
+                continue;
+            }
+
+            FName RowBulletId = Row->BulletID;
+            if (RowBulletId.IsNone())
+            {
+                RowBulletId = RowName;
+            }
+
+            if (RowBulletId.IsNone())
+            {
+                continue;
+            }
+
+            RuntimeTable.Add(RowBulletId, *Row);
+            if (FBulletDataMain* Added = RuntimeTable.Find(RowBulletId))
+            {
+                Added->BulletID = RowBulletId;
             }
         }
     }
 
     for (const FBulletDataMain& Item : InlineBulletData)
     {
-        if (Item.BulletID == BulletID)
+        if (Item.BulletID.IsNone())
         {
-            OutData = Item;
-            return true;
+            continue;
+        }
+        RuntimeTable.Add(Item.BulletID, Item);
+        if (FBulletDataMain* Added = RuntimeTable.Find(Item.BulletID))
+        {
+            Added->BulletID = Item.BulletID;
         }
     }
-
-    return false;
 }
 
 #if WITH_EDITOR
@@ -45,13 +99,15 @@ void UBulletConfig::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
     Super::PostEditChangeProperty(PropertyChangedEvent);
 
     const FName PropertyName = PropertyChangedEvent.Property ? PropertyChangedEvent.Property->GetFName() : NAME_None;
-    if (PropertyName == GET_MEMBER_NAME_CHECKED(UBulletConfig, InlineBulletData) ||
+    if (PropertyName == GET_MEMBER_NAME_CHECKED(UBulletConfig, BulletDataTables) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UBulletConfig, InlineBulletData) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(FBulletDataMain, ConfigProfile))
     {
         for (FBulletDataMain& Item : InlineBulletData)
         {
             Item.ApplyConfigProfileDefaults();
         }
+        bRuntimeTableDirty = true;
     }
 }
 #endif
@@ -75,6 +131,10 @@ void UBulletConfigSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     {
         UE_LOG(LogBullet, Warning, TEXT("BulletConfigSubsystem: No default config asset set."));
     }
+    else
+    {
+        ConfigAsset->RebuildRuntimeTable();
+    }
 }
 
 void UBulletConfigSubsystem::Deinitialize()
@@ -92,6 +152,10 @@ void UBulletConfigSubsystem::Deinitialize()
 void UBulletConfigSubsystem::SetConfigAsset(UBulletConfig* InConfig)
 {
     ConfigAsset = InConfig;
+    if (ConfigAsset)
+    {
+        ConfigAsset->RebuildRuntimeTable();
+    }
     CommonCache.Empty();
     OwnerCache.Empty();
     ClassCache.Empty();

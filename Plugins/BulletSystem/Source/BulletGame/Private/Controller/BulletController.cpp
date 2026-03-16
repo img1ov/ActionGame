@@ -429,38 +429,81 @@ int32 UBulletController::ApplyDamageToOverlaps(int32 BulletId, bool bResetHitAct
     return AppliedCount;
 }
 
-void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo) const
+void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBulletChildSpawnTrigger Trigger) const
 {
-    const FBulletDataChild& ChildData = ParentInfo.Config.Children;
-    if (ChildData.Count <= 0 || ChildData.ChildBulletID.IsNone())
+    if (ParentInfo.Config.Children.Num() == 0)
     {
         return;
     }
 
-    // Spawn via action to preserve lifecycle ordering and avoid mutating maps mid-tick.
-    FBulletActionInfo ActionInfo;
-    ActionInfo.Type = EBulletActionType::SummonBullet;
-    ActionInfo.ChildBulletID = ChildData.ChildBulletID;
-    ActionInfo.SpawnCount = ChildData.Count;
-    ActionInfo.SpreadAngle = ChildData.SpreadAngle;
-    EnqueueAction(ParentInfo.BulletId, ActionInfo);
+    for (const FBulletDataChild& ChildData : ParentInfo.Config.Children)
+    {
+        if (ChildData.ChildBulletID.IsNone() || ChildData.Count <= 0)
+        {
+            continue;
+        }
+
+        const bool bSpawnOnDestroy = ChildData.bSpawnOnDestroy;
+        const bool bSpawnOnHit = ChildData.bSpawnOnHit;
+        const bool bSpawnOnCreate = !bSpawnOnDestroy && !bSpawnOnHit;
+
+        bool bShouldSpawn = false;
+        switch (Trigger)
+        {
+        case EBulletChildSpawnTrigger::OnCreate:
+            bShouldSpawn = bSpawnOnCreate;
+            break;
+        case EBulletChildSpawnTrigger::OnHit:
+            bShouldSpawn = bSpawnOnHit;
+            break;
+        case EBulletChildSpawnTrigger::OnDestroy:
+            bShouldSpawn = bSpawnOnDestroy;
+            break;
+        default:
+            break;
+        }
+
+        if (!bShouldSpawn)
+        {
+            continue;
+        }
+
+        // Spawn via action to preserve lifecycle ordering and avoid mutating maps mid-tick.
+        FBulletActionInfo ActionInfo;
+        ActionInfo.Type = EBulletActionType::SummonBullet;
+        ActionInfo.ChildBulletID = ChildData.ChildBulletID;
+        ActionInfo.SpawnCount = ChildData.Count;
+        ActionInfo.SpreadAngle = ChildData.SpreadAngle;
+        ActionInfo.InheritOwner = ChildData.bInheritOwner ? 1 : 0;
+        ActionInfo.InheritTarget = ChildData.bInheritTarget ? 1 : 0;
+        EnqueueAction(ParentInfo.BulletId, ActionInfo);
+    }
 }
 
-void UBulletController::SpawnChildBulletsFromLogic(const FBulletInfo& ParentInfo, FName ChildBulletID, int32 Count, float SpreadAngle) const
+void UBulletController::SpawnChildBulletsFromLogic(const FBulletInfo& ParentInfo, FName ChildBulletID, int32 Count, float SpreadAngle, int32 InheritOwnerOverride, int32 InheritTargetOverride) const
 {
-    if (ChildBulletID.IsNone() || Count <= 0)
+    if (ChildBulletID.IsNone())
     {
         return;
     }
 
     const FVector Origin = ParentInfo.MoveInfo.Location;
     const FRotator BaseRot = ParentInfo.MoveInfo.Rotation;
-    // Copy parent-derived params up front to avoid referencing ParentInfo after map mutations.
-    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity);
-
-    for (int32 Index = 0; Index < Count; ++Index)
+    const FBulletDataChild* MatchingChild = FindChildEntry(ParentInfo, ChildBulletID);
+    const int32 FinalCount = (Count >= 0) ? Count : (MatchingChild ? MatchingChild->Count : 0);
+    const float FinalSpread = (SpreadAngle >= 0.0f) ? SpreadAngle : (MatchingChild ? MatchingChild->SpreadAngle : 0.0f);
+    if (FinalCount <= 0)
     {
-        const float AngleOffset = (Count == 1) ? 0.0f : FMath::Lerp(-SpreadAngle, SpreadAngle, static_cast<float>(Index) / (Count - 1));
+        return;
+    }
+    const bool bInheritOwner = (InheritOwnerOverride >= 0) ? (InheritOwnerOverride != 0) : (MatchingChild ? MatchingChild->bInheritOwner : true);
+    const bool bInheritTarget = (InheritTargetOverride >= 0) ? (InheritTargetOverride != 0) : (MatchingChild ? MatchingChild->bInheritTarget : true);
+    // Copy parent-derived params up front to avoid referencing ParentInfo after map mutations.
+    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity, bInheritOwner, bInheritTarget);
+
+    for (int32 Index = 0; Index < FinalCount; ++Index)
+    {
+        const float AngleOffset = (FinalCount == 1) ? 0.0f : FMath::Lerp(-FinalSpread, FinalSpread, static_cast<float>(Index) / (FinalCount - 1));
         const FRotator ChildRot = (BaseRot + FRotator(0.0f, AngleOffset, 0.0f));
 
         FBulletInitParams ChildParams = BaseParams;
@@ -587,10 +630,7 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
         }
     }
 
-    if (Info.Config.Children.bSpawnOnHit)
-    {
-        RequestSummonChildren(Info);
-    }
+    RequestSummonChildren(Info, EBulletChildSpawnTrigger::OnHit);
 
     if (!bApplyCollisionResponse)
     {
@@ -722,11 +762,11 @@ void UBulletController::FlushDestroyedBullets() const
     }
 }
 
-FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform) const
+FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget) const
 {
     FBulletInitParams Params;
-    Params.Owner = ParentInfo.Config.Children.bInheritOwner ? ParentInfo.InitParams.Owner : nullptr;
-    Params.TargetActor = ParentInfo.Config.Children.bInheritTarget ? ParentInfo.InitParams.TargetActor : nullptr;
+    Params.Owner = bInheritOwner ? ParentInfo.InitParams.Owner : nullptr;
+    Params.TargetActor = bInheritTarget ? ParentInfo.InitParams.TargetActor : nullptr;
     Params.TargetLocation = ParentInfo.InitParams.TargetLocation;
     Params.SpawnTransform = ChildTransform;
     Params.ContextId = ParentInfo.InitParams.ContextId;
@@ -734,5 +774,23 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     Params.ParentBulletId = ParentInfo.BulletId;
     Params.SyncType = ParentInfo.InitParams.SyncType;
     return Params;
+}
+
+const FBulletDataChild* UBulletController::FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const
+{
+    if (ChildBulletID.IsNone())
+    {
+        return nullptr;
+    }
+
+    for (const FBulletDataChild& Child : ParentInfo.Config.Children)
+    {
+        if (Child.ChildBulletID == ChildBulletID)
+        {
+            return &Child;
+        }
+    }
+
+    return nullptr;
 }
 

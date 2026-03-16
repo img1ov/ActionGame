@@ -421,8 +421,8 @@ struct FBulletDataMain : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summon", meta = (ShowOnlyInnerProperties))
     FBulletDataSummon Summon;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (ShowOnlyInnerProperties))
-    FBulletDataChild Children;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (TitleProperty = "ChildBulletID"))
+    TArray<FBulletDataChild> Children;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Obstacle", meta = (ShowOnlyInnerProperties))
     FBulletDataObstacle Obstacle;
@@ -433,7 +433,15 @@ struct FBulletDataMain : public FTableRowBase
     bool CheckSimpleBullet() const
     {
         const bool bHasLogic = Execution.LogicDataList.Num() > 0;
-        const bool bHasChildren = !Children.ChildBulletID.IsNone() && Children.Count > 0;
+        bool bHasChildren = false;
+        for (const FBulletDataChild& Child : Children)
+        {
+            if (!Child.ChildBulletID.IsNone() && Child.Count > 0)
+            {
+                bHasChildren = true;
+                break;
+            }
+        }
         const bool bHasSummon = Summon.SummonClass != nullptr;
         const bool bHasInteract = Interact.bEnableInteract || Obstacle.bEnableObstacle;
         return !bHasLogic && !bHasChildren && !bHasSummon && !bHasInteract;
@@ -573,12 +581,20 @@ struct FBulletActionInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     FName ChildBulletID;
 
-    // Optional override for SummonBullet actions (-1 = use config Children.Count).
+    // Optional override for SummonBullet actions (-1 = use matching child config Count).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     int32 SpawnCount = -1;
 
-    // Optional override for SummonBullet actions (-1 = use config Children.SpreadAngle).
+    // Optional override for SummonBullet actions (-1 = use matching child config SpreadAngle).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     float SpreadAngle = -1.0f;
+
+    // Optional inherit override for SummonBullet actions (-1 = use config or default true).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    int32 InheritOwner = -1;
+
+    // Optional inherit override for SummonBullet actions (-1 = use config or default true).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    int32 InheritTarget = -1;
 };
 

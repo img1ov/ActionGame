@@ -69,7 +69,16 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
     InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::TimeScale});
     InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::AfterInit});
 
-    if (BulletInfo.Config.Children.Count > 0)
+    bool bHasChildren = false;
+    for (const FBulletDataChild& Child : BulletInfo.Config.Children)
+    {
+        if (!Child.ChildBulletID.IsNone() && Child.Count > 0)
+        {
+            bHasChildren = true;
+            break;
+        }
+    }
+    if (bHasChildren)
     {
         InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::Child});
     }
@@ -296,15 +305,12 @@ void UBulletActionChild::Execute(UBulletController* InController, FBulletInfo& B
         return;
     }
 
-    if (BulletInfo.Config.Children.Count <= 0)
+    if (BulletInfo.Config.Children.Num() == 0)
     {
         return;
     }
 
-    if (!BulletInfo.Config.Children.bSpawnOnDestroy && !BulletInfo.Config.Children.bSpawnOnHit)
-    {
-        InController->RequestSummonChildren(BulletInfo);
-    }
+    InController->RequestSummonChildren(BulletInfo, EBulletChildSpawnTrigger::OnCreate);
 }
 
 // Spawn child bullets via controller helper.
@@ -315,10 +321,10 @@ void UBulletActionSummonBullet::Execute(UBulletController* InController, FBullet
         return;
     }
 
-    const FName ChildBulletID = ActionInfo.ChildBulletID.IsNone() ? BulletInfo.Config.Children.ChildBulletID : ActionInfo.ChildBulletID;
-    const int32 Count = ActionInfo.SpawnCount >= 0 ? ActionInfo.SpawnCount : BulletInfo.Config.Children.Count;
-    const float Spread = ActionInfo.SpreadAngle >= 0.0f ? ActionInfo.SpreadAngle : BulletInfo.Config.Children.SpreadAngle;
-    InController->SpawnChildBulletsFromLogic(BulletInfo, ChildBulletID, Count, Spread);
+    const FName ChildBulletID = ActionInfo.ChildBulletID;
+    const int32 Count = ActionInfo.SpawnCount;
+    const float Spread = ActionInfo.SpreadAngle;
+    InController->SpawnChildBulletsFromLogic(BulletInfo, ChildBulletID, Count, Spread, ActionInfo.InheritOwner, ActionInfo.InheritTarget);
 }
 
 // Spawn a non-bullet actor defined by Summon config.
@@ -355,9 +361,9 @@ void UBulletActionDestroyBullet::Execute(UBulletController* InController, FBulle
         }
     }
 
-    if (ActionInfo.bSpawnChildren && BulletInfo.Config.Children.bSpawnOnDestroy)
+    if (ActionInfo.bSpawnChildren)
     {
-        InController->RequestSummonChildren(BulletInfo);
+        InController->RequestSummonChildren(BulletInfo, EBulletChildSpawnTrigger::OnDestroy);
     }
 
     if (BulletInfo.EffectInfo.NiagaraComponent)

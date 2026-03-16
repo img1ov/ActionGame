@@ -27,6 +27,13 @@ class UWorld;
 struct FBulletInfo;
 struct FHitResult;
 
+enum class EBulletChildSpawnTrigger : uint8
+{
+    OnCreate,
+    OnHit,
+    OnDestroy
+};
+
 UCLASS()
 class BULLETGAME_API UBulletController : public UObject
 {
@@ -69,8 +76,8 @@ public:
     int32 GetParentBulletId(int32 ChildBulletId) const;
 
     // Child/summon helpers used by actions and logic.
-    void RequestSummonChildren(const FBulletInfo& ParentInfo) const;
-    void SpawnChildBulletsFromLogic(const FBulletInfo& ParentInfo, FName ChildBulletID, int32 Count, float SpreadAngle) const;
+    void RequestSummonChildren(const FBulletInfo& ParentInfo, EBulletChildSpawnTrigger Trigger) const;
+    void SpawnChildBulletsFromLogic(const FBulletInfo& ParentInfo, FName ChildBulletID, int32 Count, float SpreadAngle, int32 InheritOwnerOverride = -1, int32 InheritTargetOverride = -1) const;
     void SummonEntityFromConfig(const FBulletInfo& ParentInfo) const;
 
     // Acquire/release pooled render actor.
@@ -90,7 +97,8 @@ private:
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
     // Build child init params (owner/target inheritance).
-    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform) const;
+    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget) const;
+    const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const;
 
     UPROPERTY()
     TWeakObjectPtr<UWorld> World;
