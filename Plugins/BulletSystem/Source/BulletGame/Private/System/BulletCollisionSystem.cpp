@@ -29,6 +29,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
 
     #if WITH_EDITOR
     const bool bDebugDraw = Controller->IsDebugDrawEnabled();
+    const float DebugDrawDuration = 0.0f;
     #endif
     const float WorldTime = World->GetTimeSeconds();
 
@@ -153,7 +154,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 #if WITH_EDITOR
                 if (bDebugDraw)
                 {
-                    DrawDebugSphere(World, Center, Radius, 12, bAnyOverlap ? FColor::Red : FColor::Green, false, 0.1f);
+                    DrawDebugSphere(World, Center, Radius, 12, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
                 }
                 #endif
                 break;
@@ -173,7 +174,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 #if WITH_EDITOR
                 if (bDebugDraw)
                 {
-                    DrawDebugBox(World, Center, Extent, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, 0.1f);
+                    DrawDebugBox(World, Center, Extent, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
                 }
                 #endif
                 break;
@@ -194,7 +195,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 #if WITH_EDITOR
                 if (bDebugDraw)
                 {
-                    DrawDebugCapsule(World, Center, HalfHeight, Radius, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, 0.1f);
+                    DrawDebugCapsule(World, Center, HalfHeight, Radius, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
                 }
                 #endif
                 break;
@@ -215,7 +216,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 #if WITH_EDITOR
                 if (bDebugDraw)
                 {
-                    DrawDebugLine(World, Start, End, bAnyOverlap ? FColor::Red : FColor::Green, false, 0.1f);
+                    DrawDebugLine(World, Start, End, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
                 }
                 #endif
                 break;
@@ -322,7 +323,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             #if WITH_EDITOR
             if (bDebugDraw)
             {
-                DrawDebugSphere(World, End, Radius, 12, bHit ? FColor::Red : FColor::Green, false, 0.1f);
+                DrawDebugSphere(World, End, Radius, 12, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
             }
             #endif
             break;
@@ -334,7 +335,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             #if WITH_EDITOR
             if (bDebugDraw)
             {
-                DrawDebugBox(World, End, Extent, bHit ? FColor::Red : FColor::Green, false, 0.1f);
+                DrawDebugBox(World, End, Extent, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
             }
             #endif
             break;
@@ -347,7 +348,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             #if WITH_EDITOR
             if (bDebugDraw)
             {
-                DrawDebugCapsule(World, End, HalfHeight, Radius, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, 0.1f);
+                DrawDebugCapsule(World, End, HalfHeight, Radius, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
             }
             #endif
             break;
@@ -358,7 +359,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             #if WITH_EDITOR
             if (bDebugDraw)
             {
-                DrawDebugLine(World, Start, End, bHit ? FColor::Red : FColor::Green, false, 0.1f);
+                DrawDebugLine(World, Start, End, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
             }
             #endif
             break;
