@@ -5,6 +5,7 @@
 #include "AbilitySystemComponent.h"
 #include "Abilities/ActGameplayAbility.h"
 #include "NativeGameplayTags.h"
+#include "BulletSystemTypes.h"
 
 #include "ActAbilitySystemComponent.generated.h"
 
@@ -15,6 +16,7 @@ class UActGameplayAbility;
 class UObject;
 struct FFrame;
 struct FGameplayAbilityTargetDataHandle;
+struct FBulletInitParams;
 
 ACTGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Gameplay_AbilityInputBlocked);
 
@@ -113,6 +115,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="ResetGameplayTagCounts")
 	void K2_ResetGameplayTagCounts(FGameplayTagContainer TagContainer, const int32 NewCount = 0) {ResetGameplayTagCounts(TagContainer, NewCount ); }
+
+	/** Create a bullet using PawnData->BulletConfig. */
+	int32 CreateBullet(FName BulletID, const FBulletInitParams& InitParams) const;
+
+	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="CreateBullet")
+	int32 K2_CreateBullet(FName BulletID, const FBulletInitParams& InitParams);
 
 protected:
 

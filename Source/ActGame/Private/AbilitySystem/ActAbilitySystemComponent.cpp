@@ -7,6 +7,9 @@
 #include "AbilitySystem/ActAbilityTagRelationshipMapping.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
 #include "Animation/ActAnimInstance.h"
+#include "Blueprint/BulletBlueprintLibrary.h"
+#include "Character/ActPawnData.h"
+#include "Player/ActPlayerState.h"
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_AbilityInputBlocked, "Gameplay.AbilityInputBlocked");
 
@@ -477,6 +480,22 @@ void UActAbilitySystemComponent::K2_AbilityInputTagReleased(const FGameplayTag I
 	AbilityInputTagReleased(InputTag);
 }
 
+int32 UActAbilitySystemComponent::CreateBullet(FName BulletID, const FBulletInitParams& InitParams) const
+{
+	const AActPlayerState* ActPS = Cast<AActPlayerState>(GetOwnerActor());
+	if (!ActPS) return  INDEX_NONE;
+
+	const UActPawnData* PawnData = ActPS->GetPawnData<UActPawnData>();
+	if (!PawnData) return  INDEX_NONE;
+	
+	return UBulletBlueprintLibrary::CreateBullet(ActPS, PawnData->BulletConfig, BulletID, InitParams);
+}
+
+int32 UActAbilitySystemComponent::K2_CreateBullet(FName BulletID, const FBulletInitParams& InitParams)
+{
+	return CreateBullet(BulletID, InitParams);
+}
+
 void UActAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGamePaused)
 {
 	if (HasMatchingGameplayTag(TAG_Gameplay_AbilityInputBlocked))
@@ -540,7 +559,7 @@ void UActAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGame
 	//
 	// Try to activate all the abilities that are from presses and holds.
 	// We do it all at once so that held inputs don't activate the ability
-	// and then also send a input event to the ability because of the press.
+	// and then also send an input event to the ability because of the press.
 	//
 	if (!AbilitiesToActive.IsEmpty())
 	{
@@ -598,7 +617,7 @@ bool UActAbilitySystemComponent::IsActivationGroupBlocked(EActAbilityActivationG
 	case EActAbilityActivationGroup::Exclusive_Replaceable:
 	case EActAbilityActivationGroup::Exclusive_Blocking:
 		// Exclusive abilities can activate if nothing is blocking.
-		bBlocked = (ActivationGroupCounts[(uint8)EActAbilityActivationGroup::Exclusive_Blocking] > 0);
+		bBlocked = (ActivationGroupCounts[static_cast<uint8>(EActAbilityActivationGroup::Exclusive_Blocking)] > 0);
 		break;
 
 	default:
@@ -679,8 +698,7 @@ void UActAbilitySystemComponent::OnGiveAbility(FGameplayAbilitySpec& AbilitySpec
 
 void UActAbilitySystemComponent::OnRemoveAbility(FGameplayAbilitySpec& AbilitySpec)
 {
-	const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec.Ability);
-	if (ActAbilityCDO)
+	if (const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec.Ability))
 	{
 		const FName AbilityID = ActAbilityCDO->GetAbilityID();
 		if (!AbilityID.IsNone())
@@ -713,7 +731,9 @@ void UActAbilitySystemComponent::AbilitySpecInputPressed(FGameplayAbilitySpec& S
 	{
 		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		const UGameplayAbility* Instance = Spec.GetPrimaryInstance();
-		FPredictionKey OriginalPredictionKey = Instance ? Instance->GetCurrentActivationInfo().GetActivationPredictionKey() : Spec.ActivationInfo.GetActivationPredictionKey();
+		const FPredictionKey OriginalPredictionKey = Instance
+			? Instance->GetCurrentActivationInfo().GetActivationPredictionKey()
+			: Spec.ActivationInfo.GetActivationPredictionKey();
 		PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 		// Invoke the InputPressed event. This is not replicated here. If someone is listening, they may replicate the InputPressed event to the server.
@@ -731,7 +751,9 @@ void UActAbilitySystemComponent::AbilitySpecInputReleased(FGameplayAbilitySpec& 
 	{
 		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		const UGameplayAbility* Instance = Spec.GetPrimaryInstance();
-		FPredictionKey OriginalPredictionKey = Instance ? Instance->GetCurrentActivationInfo().GetActivationPredictionKey() : Spec.ActivationInfo.GetActivationPredictionKey();
+		const FPredictionKey OriginalPredictionKey = Instance
+			? Instance->GetCurrentActivationInfo().GetActivationPredictionKey()
+			: Spec.ActivationInfo.GetActivationPredictionKey();
 		PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 		// Invoke the InputReleased event. This is not replicated here. If someone is listening, they may replicate the InputReleased event to the server.

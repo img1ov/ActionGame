@@ -16,12 +16,16 @@
 	"Installed": false,
 	"Modules": [
 		{
-			"Name": "BulletSystem",
+			"Name": "BulletGame",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
+		{
+			"Name": "GameplayAbilities",
+			"Enabled": true
+		},
 		{
 			"Name": "Niagara",
 			"Enabled": true

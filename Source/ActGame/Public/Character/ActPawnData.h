@@ -11,6 +11,7 @@ class UActInputCommandConfig;
 class UActInputConfig;
 class UActAbilityTagRelationshipMapping;
 class UActAbilitySet;
+class UBulletConfig;
 
 UCLASS()
 class ACTGAME_API UActPawnData : public UPrimaryDataAsset
@@ -36,4 +37,7 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Input")
 	TObjectPtr<UActInputCommandConfig> InputCommandConfig;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Bullet")
+	TObjectPtr<UBulletConfig> BulletConfig;
 };

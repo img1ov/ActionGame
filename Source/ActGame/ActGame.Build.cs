@@ -1,4 +1,4 @@
-﻿using UnrealBuildTool;
+﻿﻿using UnrealBuildTool;
 
 public class ActGame : ModuleRules
 {
@@ -35,6 +35,7 @@ public class ActGame : ModuleRules
                 "GameplayTasks",
                 "GameplayAbilities",
                 "AIModule",
+                "BulletGame",
                 "ModularGameplay",
                 "ModularGameplayActors",
                 "DataRegistry",
