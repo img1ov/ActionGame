@@ -4,6 +4,7 @@
 #include "Character/ActCharacter.h"
 
 #include "ActGameplayTags.h"
+#include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Camera/ActCameraComponent.h"
 #include "Camera/ActSpringArmComponent.h"
@@ -185,6 +186,7 @@ void AActCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME_CONDITION(ThisClass, ReplicatedAcceleration, COND_SimulatedOnly);
+	DOREPLIFETIME(ThisClass, MyTeamID);
 }
 
 void AActCharacter::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
@@ -207,7 +209,50 @@ void AActCharacter::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTr
 
 void AActCharacter::NotifyControllerChanged()
 {
+	const FGenericTeamId OldTeamId = GetGenericTeamId();
+	
 	Super::NotifyControllerChanged();
+	
+	// Update our team ID based on the controller
+	if (HasAuthority() && (GetController() != nullptr))
+	{
+		if (const IActTeamAgentInterface* ControllerWithTeam = Cast<IActTeamAgentInterface>(GetController()))
+		{
+			MyTeamID = ControllerWithTeam->GetGenericTeamId();
+			ConditionalBroadcastTeamChanged(this, OldTeamId, MyTeamID);
+		}
+	}
+}
+
+void AActCharacter::SetGenericTeamId(const FGenericTeamId& NewTeamID)
+{
+	if (GetController() == nullptr)
+	{
+		if (HasAuthority())
+		{
+			const FGenericTeamId OldTeamID = MyTeamID;
+			MyTeamID = NewTeamID;
+			ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
+		}
+		else
+		{
+			UE_LOG(LogActTeams, Error, TEXT("You can't set the team ID on a character (%s) except on the authority"), *GetPathNameSafe(this));
+		}
+	}
+	else
+	{
+		UE_LOG(LogActTeams, Error, TEXT("You can't set the team ID on a possessed character (%s); it's driven by the associated controller"), *GetPathNameSafe(this));
+	}
+}
+
+FGenericTeamId AActCharacter::GetGenericTeamId() const
+{
+	return MyTeamID;
+}
+
+FOnActTeamIndexChangedDelegate* AActCharacter::GetOnTeamIndexChangedDelegate()
+{
+	return &OnTeamChangedDelegate;
 }
 
 void AActCharacter::FastSharedReplication_Implementation(const FSharedRepMovement& SharedRepMovement)
@@ -276,6 +321,18 @@ bool AActCharacter::UpdateSharedReplication()
 	return false;
 }
 
+void AActCharacter::OnControllerChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam)
+{
+	const FGenericTeamId MyOldTeamID = MyTeamID;
+	MyTeamID = IntegerToGenericTeamId(NewTeam);
+	ConditionalBroadcastTeamChanged(this, MyOldTeamID, MyTeamID);
+}
+
+void AActCharacter::OnRep_MyTeamID(FGenericTeamId OldTeamID)
+{
+	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
+}
+
 void AActCharacter::OnRep_ReplicatedAcceleration()
 {
 	if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(GetCharacterMovement()))
@@ -310,16 +367,39 @@ void AActCharacter::OnAbilitySystemUninitialized()
 
 void AActCharacter::PossessedBy(AController* NewController)
 {
+	const FGenericTeamId OldTeamID = MyTeamID;
+	
 	Super::PossessedBy(NewController);
 
 	PawnExtComponent->HandleControllerChanged();
+	
+	// Grab the current team ID and listen for future changes
+	if (IActTeamAgentInterface* ControllerAsTeamProvider = Cast<IActTeamAgentInterface>(NewController))
+	{
+		MyTeamID = ControllerAsTeamProvider->GetGenericTeamId();
+		ControllerAsTeamProvider->GetTeamChangedDelegateChecked().AddDynamic(this, &ThisClass::OnControllerChangedTeam);
+	}
+	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
 }
 
 void AActCharacter::UnPossessed()
 {
+	AController* const OldController = GetController();
+
+	// Stop listening for changes from the old controller
+	const FGenericTeamId OldTeamID = MyTeamID;
+	if (IActTeamAgentInterface* ControllerAsTeamProvider = Cast<IActTeamAgentInterface>(OldController))
+	{
+		ControllerAsTeamProvider->GetTeamChangedDelegateChecked().RemoveAll(this);
+	}
+	
 	Super::UnPossessed();
 
 	PawnExtComponent->HandleControllerChanged();
+	
+	// Determine what the new team ID should be afterwards
+	MyTeamID = DetermineNewTeamAfterPossessionEnds(OldTeamID);
+	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
 }
 
 void AActCharacter::OnRep_Controller()
@@ -472,9 +552,9 @@ void AActCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeight
 
 void AActCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
 {
-	if (UActAbilitySystemComponent* LyraASC = GetActAbilitySystemComponent())
+	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponent())
 	{
-		LyraASC->SetLooseGameplayTagCount(ActGameplayTags::Status_Crouching, 0);
+		ActASC->SetLooseGameplayTagCount(ActGameplayTags::Status_Crouching, 0);
 	}
 
 	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);

@@ -496,6 +496,18 @@ int32 UActAbilitySystemComponent::K2_CreateBullet(FName BulletID, const FBulletI
 	return CreateBullet(BulletID, InitParams);
 }
 
+void UActAbilitySystemComponent::TryActivateAbilitiesOnSpawn()
+{
+	ABILITYLIST_SCOPE_LOCK();
+	for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
+	{
+		if (const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec.Ability))
+		{
+			ActAbilityCDO->TryActivateAbilityOnSpawn(AbilityActorInfo.Get(), AbilitySpec);
+		}
+	}
+}
+
 void UActAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGamePaused)
 {
 	if (HasMatchingGameplayTag(TAG_Gameplay_AbilityInputBlocked))

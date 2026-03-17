@@ -2,16 +2,20 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
 #include "AbilitySystemGlobals.h"
+
 #include "ActAbilitySystemGlobals.generated.h"
 
-/**
- * 
- */
-UCLASS()
-class ACTGAME_API UActAbilitySystemGlobals : public UAbilitySystemGlobals
+class UObject;
+struct FGameplayEffectContext;
+
+UCLASS(Config=Game)
+class UActAbilitySystemGlobals : public UAbilitySystemGlobals
 {
-	GENERATED_BODY()
+	GENERATED_UCLASS_BODY()
+	
+	//~UAbilitySystemGlobals interface
+	virtual FGameplayEffectContext* AllocGameplayEffectContext() const override;
+	//~End of UAbilitySystemGlobals interface
 	
 };

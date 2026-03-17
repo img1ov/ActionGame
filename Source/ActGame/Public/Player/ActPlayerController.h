@@ -3,11 +3,16 @@
 #pragma once
 
 #include "AbilitySystemInterface.h"
+#include "CommonPlayerController.h"
 #include "Input/ActBattleInputAnalyzer.h"
 #include "Input/ActCommandRuntimeResolver.h"
-#include "ModularPlayerController.h"
+#include "Teams/ActTeamAgentInterface.h"
 
 #include "ActPlayerController.generated.h"
+
+#define UE_API ACTGAME_API
+
+struct FGenericTeamId;
 
 class UStateTree;
 class UActStateTreeComponent;
@@ -22,71 +27,111 @@ class FActBattleInputAnalyzer;
 DECLARE_MULTICAST_DELEGATE_OneParam(FActInputCommandMatched, const FGameplayTag&);
 
 /**
- * Input orchestration point for local player:
- * - receives raw input events from HeroComponent,
- * - feeds analyzer,
- * - consumes matched command tags,
- * - optionally resolves combo derivations,
- * - then forwards final trigger tags to ASC.
+ * AActPlayerController
+ *
+ *	The base player controller class used by this project.
  */
-UCLASS()
-class ACTGAME_API AActPlayerController :  public AModularPlayerController, public IAbilitySystemInterface
+UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "The base player controller class used by this project."))
+class AActPlayerController :  public ACommonPlayerController, public IAbilitySystemInterface, public IActTeamAgentInterface
 {
 	GENERATED_BODY()
 
 public:
 	
-	AActPlayerController(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
-	virtual ~AActPlayerController() override;
+	UE_API AActPlayerController(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+	UE_API virtual ~AActPlayerController() override;
 
 	UFUNCTION(BlueprintCallable, Category = "Act|PlayerController")
-	AActPlayerState* GetActPlayerState() const;
+	UE_API AActPlayerState* GetActPlayerState() const;
 	
 	UFUNCTION(BlueprintCallable, Category = "Act|PlayerController")
-	UActAbilitySystemComponent* GetActAbilitySystemComponent() const;
+	UE_API UActAbilitySystemComponent* GetActAbilitySystemComponent() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Act|PlayerController")
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-
-	//~APlayerController interface
-	virtual void PreProcessInput(const float DeltaTime, const bool bGamePaused) override;
-	virtual void PostProcessInput(const float DeltaTime, const bool bGamePaused) override;
-	virtual void PlayerTick(float DeltaTime) override;
-	//~End of APlayerController interface
+	UE_API virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+	
+	//~IActTeamAgentInterface interface
+	UE_API virtual void SetGenericTeamId(const FGenericTeamId& NewTeamID) override;
+	UE_API virtual FGenericTeamId GetGenericTeamId() const override;
+	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
+	//~End of IActTeamAgentInterface interface
 
 	/** Push one pressed input tag into runtime analyzer history. */
-	void PushInputTagPressedToAnalyzer(const FGameplayTag& InputTag) const;
+	UE_API void PushInputTagPressedToAnalyzer(const FGameplayTag& InputTag) const;
 
 	/** Queue an ability input tag press; will be routed after command matching. */
-	void QueueAbilityInputTagPressed(const FGameplayTag& InputTag);
+	UE_API void QueueAbilityInputTagPressed(const FGameplayTag& InputTag);
 
 	/** Queue an ability input tag release; will be routed after command matching. */
-	void QueueAbilityInputTagReleased(const FGameplayTag& InputTag);
+	UE_API void QueueAbilityInputTagReleased(const FGameplayTag& InputTag);
 
 	/** Push normalized movement direction into runtime analyzer history. */
-	void PushDirectionToAnalyzer(EInputDirection InputDirection);
+	UE_API void PushDirectionToAnalyzer(EInputDirection InputDirection);
 
 	/** Replace command definitions used by analyzer. */
-	void ConfigureInputCommandDefinitions(const TArray<FInputCommandDefinition>& InCommandDefinitions);
+	UE_API void ConfigureInputCommandDefinitions(const TArray<FInputCommandDefinition>& InCommandDefinitions);
 
 	/** Runtime command matched event. */
-	FActInputCommandMatched& OnInputCommandMatched() { return InputCommandMatched; }
+	UE_API FActInputCommandMatched& OnInputCommandMatched() { return InputCommandMatched; }
 
 	/** Debug/inspection only: analyzer internals are not mutation API. */
-	const FActBattleInputAnalyzer* GetInputAnalyzer() const { return BattleInputAnalyzer.Get(); }
-
+	UE_API const FActBattleInputAnalyzer* GetInputAnalyzer() const { return BattleInputAnalyzer.Get(); }
+	
+	/** Ability Chain */
+	UE_API void RegisterAbilityChainWindow(FName WindowId, const TArray<FActAbilityChainEntry>& ChainEntries);
+	UE_API void UnregisterAbilityChainWindow(FName WindowId);
+	UE_API void ClearAbilityChainCache();
+	/** ~End of Ability Chain */
+	
 protected:
+	
+	//~AActor interface
+	UE_API virtual void PreInitializeComponents() override;
+	UE_API virtual void BeginPlay() override;
+	UE_API virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	UE_API virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	//~End of AActor interface
+	
+	//~AController interface
+	UE_API virtual void OnPossess(APawn* InPawn) override;
+	UE_API virtual void OnUnPossess() override;
+	UE_API virtual void InitPlayerState() override;
+	UE_API virtual void CleanupPlayerState() override;
+	UE_API virtual void OnRep_PlayerState() override;
+	//~End of AController interface
+	
+	//~APlayerController interface
+	UE_API virtual void PreProcessInput(const float DeltaTime, const bool bGamePaused) override;
+	UE_API virtual void PostProcessInput(const float DeltaTime, const bool bGamePaused) override;
+	UE_API virtual void PlayerTick(float DeltaTime) override;
+	//~End of APlayerController interface
+	
+	// Called when the player state is set or cleared
+	UE_API virtual void OnPlayerStateChanged();
+	
+	/* Input Analyzer */
 	void HandleInputCommandMatched(const FGameplayTag& CommandTag) const;
 	void BuildAnalyzerStateTags(FGameplayTagContainer& OutStateTags) const;
 	double GetAnalyzerCurrentTimeSeconds() const;
-
-public:
-	
-	void RegisterAbilityChainWindow(FName WindowId, const TArray<FActAbilityChainEntry>& ChainEntries);
-	void UnregisterAbilityChainWindow(FName WindowId);
-	void ClearAbilityChainCache();
+	/* ~End of Input Analyzer */
 
 private:
+	
+	UPROPERTY()
+	FOnActTeamIndexChangedDelegate OnTeamChangedDelegate;
+
+	UPROPERTY()
+	TObjectPtr<APlayerState> LastSeenPlayerState;
+	
+private:
+	
+	void BroadcastOnPlayerStateChanged();
+	
+	UFUNCTION()
+	void OnPlayerStateChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam);
+
+private:
+	
 	TUniquePtr<FActBattleInputAnalyzer> BattleInputAnalyzer;
 	TUniquePtr<FActCommandRuntimeResolver> ComboRuntime;
 	FActInputCommandMatched InputCommandMatched;
@@ -95,3 +140,5 @@ private:
 	TArray<FGameplayTag> PendingAbilityInputReleased;
 	bool bCommandMatchedThisFrame = false;
 };
+
+#undef UE_API

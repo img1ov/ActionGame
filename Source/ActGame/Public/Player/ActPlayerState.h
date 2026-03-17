@@ -5,8 +5,11 @@
 #include "ModularPlayerState.h"
 #include "AbilitySystemInterface.h"
 #include "Character/ActPawnData.h"
+#include "Teams/ActTeamAgentInterface.h"
 
 #include "ActPlayerState.generated.h"
+
+#define UE_API ACTGAME_API
 
 class UActExperienceDefinition;
 class AController;
@@ -20,12 +23,13 @@ class UObject;
 struct FFrame;
 struct FGameplayTag;
 
-
 /**
- * 
+ * AActPlayerState
+ *
+ *	Base player state class used by this project.
  */
-UCLASS()
-class ACTGAME_API AActPlayerState : public AModularPlayerState, public IAbilitySystemInterface
+UCLASS(MinimalAPI, Config = Game)
+class AActPlayerState : public AModularPlayerState, public IAbilitySystemInterface, public IActTeamAgentInterface
 {
 	GENERATED_BODY()
 
@@ -49,6 +53,12 @@ public:
 	virtual void PreInitializeComponents() override;
 	virtual void PostInitializeComponents() override;
 	//~End of AActor interface
+	
+	//~ILyraTeamAgentInterface interface
+	UE_API virtual void SetGenericTeamId(const FGenericTeamId& NewTeamID) override;
+	UE_API virtual FGenericTeamId GetGenericTeamId() const override;
+	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
+	//~End of ILyraTeamAgentInterface interface
 
 protected:
 	
@@ -77,4 +87,18 @@ private:
 	// Combat attribute set used by this actor.
 	UPROPERTY()
 	TObjectPtr<const class UActCombatSet> CombatSet;
+	
+	UPROPERTY(ReplicatedUsing=OnRep_MyTeamID)
+	FGenericTeamId MyTeamID;
+	
+	UPROPERTY()
+	FOnActTeamIndexChangedDelegate OnTeamChangedDelegate;
+	
+private:
+	
+	UFUNCTION()
+	UE_API void OnRep_MyTeamID(FGenericTeamId OldTeamID);
+	
 };
+
+#undef UE_API

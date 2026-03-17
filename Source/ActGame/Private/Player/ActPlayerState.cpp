@@ -13,6 +13,7 @@
 #include "GameModes/ActExperienceManagerComponent.h"
 #include "GameModes/ActGameMode.h"
 #include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 class AController;
 class APlayerState;
@@ -31,11 +32,13 @@ AActPlayerState::AActPlayerState(const FObjectInitializer& ObjectInitializer)
 
 	// AbilitySystemComponent needs to be updated at a high frequency.
 	SetNetUpdateFrequency(100.0f);
+	
+	MyTeamID = FGenericTeamId::NoTeam;
 }
 
 AActPlayerController* AActPlayerState::GetActPlayerController() const
 {
-	return Cast<AActPlayerController>(GetOwner());
+	return Cast<AActPlayerController>(GetOwningController());
 }
 
 UAbilitySystemComponent* AActPlayerState::GetAbilitySystemComponent() const
@@ -96,6 +99,33 @@ void AActPlayerState::PostInitializeComponents()
 	}
 }
 
+void AActPlayerState::SetGenericTeamId(const FGenericTeamId& NewTeamID)
+{
+	if (HasAuthority())
+	{
+		const FGenericTeamId OldTeamID = MyTeamID;
+
+		MARK_PROPERTY_DIRTY_FROM_NAME(ThisClass, MyTeamID, this);
+		MyTeamID = NewTeamID;
+		ConditionalBroadcastTeamChanged(this, OldTeamID, NewTeamID);
+		ForceNetUpdate();
+	}
+	else
+	{
+		UE_LOG(LogActTeams, Error, TEXT("Cannot set team for %s on non-authority"), *GetPathName(this));
+	}
+}
+
+FGenericTeamId AActPlayerState::GetGenericTeamId() const
+{
+	return MyTeamID;
+}
+
+FOnActTeamIndexChangedDelegate* AActPlayerState::GetOnTeamIndexChangedDelegate()
+{
+	return &OnTeamChangedDelegate;
+}
+
 void AActPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -104,6 +134,7 @@ void AActPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	SharedParams.bIsPushBased = true;
 
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, PawnData, SharedParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, MyTeamID, SharedParams);
 }
 
 void AActPlayerState::OnRep_PawnData()
@@ -123,4 +154,9 @@ void AActPlayerState::OnExperienceLoaded(const UActExperienceDefinition* Current
 			UE_LOG(LogAct, Error, TEXT("AActPlayerState::OnExperienceLoaded(): Unable to find PawnData to initialize player state [%s]!"), *GetNameSafe(this));
 		}
 	}
+}
+
+void AActPlayerState::OnRep_MyTeamID(FGenericTeamId OldTeamID)
+{
+	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
 }

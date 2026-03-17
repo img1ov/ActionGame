@@ -5,6 +5,7 @@
 #include "ModularCharacter.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagAssetInterface.h"
+#include "Teams/ActTeamAgentInterface.h"
 
 #include "ActCharacter.generated.h"
 
@@ -84,7 +85,7 @@ struct TStructOpsTypeTraits<FSharedRepMovement> : public TStructOpsTypeTraitsBas
  *	New behavior should be added via pawn components when possible.
  */
 UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "The base character pawn class used by this project."))
-class AActCharacter : public AModularCharacter, public IAbilitySystemInterface, public IGameplayTagAssetInterface
+class AActCharacter : public AModularCharacter, public IAbilitySystemInterface, public IGameplayTagAssetInterface, public IActTeamAgentInterface
 {
 	GENERATED_BODY()
 
@@ -124,13 +125,20 @@ public:
 	UE_API virtual void NotifyControllerChanged() override;
 	//~End of APawn interface
 	
+	//~IActTeamAgentInterface interface
+	UE_API virtual void SetGenericTeamId(const FGenericTeamId& NewTeamID) override;
+	UE_API virtual FGenericTeamId GetGenericTeamId() const override;
+	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
+	//~End of IActTeamAgentInterface interface
+	
+	/** RPCs that is called on frames when default property replication is skipped. This replicates a single movement update to everyone. */
 	UFUNCTION(NetMulticast, unreliable)
 	UE_API void FastSharedReplication(const FSharedRepMovement& SharedRepMovement);
 	
-	virtual bool UpdateSharedReplication();
+	// Last FSharedRepMovement we sent, to avoid sending repeatedly.
+	FSharedRepMovement LastSharedReplication;
 	
-	UFUNCTION()
-	UE_API void OnRep_ReplicatedAcceleration();
+	virtual bool UpdateSharedReplication();
 
 protected:
 
@@ -172,11 +180,6 @@ protected:
 	UE_API virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 	
 	UE_API virtual bool CanJumpInternal_Implementation() const override;
-
-public:
-
-	// Last FSharedRepMovement we sent, to avoid sending repeatedly.
-	FSharedRepMovement LastSharedReplication;
 	
 private:
 	
@@ -194,6 +197,33 @@ private:
 	
 	UPROPERTY(Transient, ReplicatedUsing = OnRep_ReplicatedAcceleration)
 	FActReplicatedAcceleration ReplicatedAcceleration;
+	
+	UPROPERTY(ReplicatedUsing = OnRep_MyTeamID)
+	FGenericTeamId MyTeamID;
+	
+	UPROPERTY()
+	FOnActTeamIndexChangedDelegate OnTeamChangedDelegate;
+	
+protected:
+	
+	// Called to determine what happens to the team ID when possession ends
+	virtual FGenericTeamId DetermineNewTeamAfterPossessionEnds(FGenericTeamId OldTeamID) const
+	{
+		// This could be changed to return, e.g., OldTeamID if you want to keep it assigned afterwards, or return an ID for some neutral faction, or etc...
+		return FGenericTeamId::NoTeam;
+	}
+	
+private:
+	
+	UFUNCTION()
+	UE_API void OnControllerChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam);
+	
+	UFUNCTION()
+	UE_API void OnRep_ReplicatedAcceleration();
+	
+	UFUNCTION()
+	UE_API void OnRep_MyTeamID(FGenericTeamId OldTeamID);
+	
 };
 
 #undef UE_API

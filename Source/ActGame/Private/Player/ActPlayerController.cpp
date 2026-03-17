@@ -3,6 +3,8 @@
 
 #include "Player/ActPlayerController.h"
 
+#include "AbilitySystemGlobals.h"
+#include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Player/ActPlayerState.h"
 
@@ -31,6 +33,89 @@ UActAbilitySystemComponent* AActPlayerController::GetActAbilitySystemComponent()
 UAbilitySystemComponent* AActPlayerController::GetAbilitySystemComponent() const
 {
 	return GetActAbilitySystemComponent();
+}
+
+void AActPlayerController::PreInitializeComponents()
+{
+	Super::PreInitializeComponents();
+}
+
+void AActPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+
+	SetActorHiddenInGame(false);
+}
+
+void AActPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+}
+
+void AActPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+}
+
+void AActPlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+}
+
+void AActPlayerController::OnUnPossess()
+{
+	// Make sure the pawn that is being unpossessed doesn't remain our ASC's avatar actor
+	if (const APawn* PawnBeingUnpossessed = GetPawn())
+	{
+		const APlayerState* ThePlayerState = PlayerState.Get();
+		if (IsValid(ThePlayerState))
+		{
+			if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ThePlayerState))
+			{
+				if (ASC->GetAvatarActor() == PawnBeingUnpossessed)
+				{
+					ASC->SetAvatarActor(nullptr);
+				}
+			}
+		}
+	}
+
+	Super::OnUnPossess();
+}
+
+void AActPlayerController::InitPlayerState()
+{
+	Super::InitPlayerState();
+	BroadcastOnPlayerStateChanged();
+}
+
+void AActPlayerController::CleanupPlayerState()
+{
+	Super::CleanupPlayerState();
+	BroadcastOnPlayerStateChanged();
+}
+
+void AActPlayerController::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	BroadcastOnPlayerStateChanged();
+
+	// When we're a client connected to a remote server, the player controller may replicate later than the PlayerState and AbilitySystemComponent.
+	// However, TryActivateAbilitiesOnSpawn depends on the player controller being replicated in order to check whether on-spawn abilities should
+	// execute locally. Therefore once the PlayerController exists and has resolved the PlayerState, try once again to activate on-spawn abilities.
+	// On other net modes the PlayerController will never replicate late, so LyraASC's own TryActivateAbilitiesOnSpawn calls will succeed. The handling 
+	// here is only for when the PlayerState and ASC replicated before the PC and incorrectly thought the abilities were not for the local player.
+	if (GetWorld()->IsNetMode(NM_Client))
+	{
+		if (AActPlayerState* ActPS = GetPlayerState<AActPlayerState>())
+		{
+			if (UActAbilitySystemComponent* ActASC = ActPS->GetActAbilitySystemComponent())
+			{
+				ActASC->RefreshAbilityActorInfo();
+				ActASC->TryActivateAbilitiesOnSpawn();
+			}
+		}
+	}
 }
 
 void AActPlayerController::PreProcessInput(const float DeltaTime, const bool bGamePaused)
@@ -97,6 +182,26 @@ void AActPlayerController::PlayerTick(float DeltaTime)
 			}
 		}
 	}
+}
+
+void AActPlayerController::SetGenericTeamId(const FGenericTeamId& NewTeamID)
+{
+	UE_LOG(LogActTeams, Error, TEXT("You can't set the team ID on a player controller (%s); it's driven by the associated player state"), *GetPathNameSafe(this));
+}
+
+FGenericTeamId AActPlayerController::GetGenericTeamId() const
+{
+	if (const IActTeamAgentInterface* PSWithTeamInterface = Cast<IActTeamAgentInterface>(PlayerState))
+	{
+		return PSWithTeamInterface->GetGenericTeamId();
+	}
+	
+	return FGenericTeamId::NoTeam;
+}
+
+FOnActTeamIndexChangedDelegate* AActPlayerController::GetOnTeamIndexChangedDelegate()
+{
+	return &OnTeamChangedDelegate;
 }
 
 void AActPlayerController::PushInputTagPressedToAnalyzer(const FGameplayTag& InputTag) const
@@ -190,6 +295,43 @@ double AActPlayerController::GetAnalyzerCurrentTimeSeconds() const
 	return World ? World->GetTimeSeconds() : 0.0;
 }
 
+void AActPlayerController::BroadcastOnPlayerStateChanged()
+{
+	OnPlayerStateChanged();
+	
+	// Unbind from the old player state, if any
+	FGenericTeamId OldTeamID = FGenericTeamId::NoTeam;
+	if (LastSeenPlayerState != nullptr)
+	{
+		if (IActTeamAgentInterface* PlayerStateTeamInterface = Cast<IActTeamAgentInterface>(LastSeenPlayerState))
+		{
+			OldTeamID = PlayerStateTeamInterface->GetGenericTeamId();
+			PlayerStateTeamInterface->GetTeamChangedDelegateChecked().RemoveAll(this);
+		}
+	}
+	
+	// Bind to the new player state, if any
+	FGenericTeamId NewTeamID = FGenericTeamId::NoTeam;
+	if (PlayerState != nullptr)
+	{
+		if (IActTeamAgentInterface* PlayerStateTeamInterface = Cast<IActTeamAgentInterface>(PlayerState))
+		{
+			NewTeamID = PlayerStateTeamInterface->GetGenericTeamId();
+			PlayerStateTeamInterface->GetTeamChangedDelegateChecked().AddDynamic(this, &ThisClass::OnPlayerStateChangedTeam);
+		}
+	}
+	
+	// Broadcast the team change (if it really has)
+	ConditionalBroadcastTeamChanged(this, OldTeamID, NewTeamID);
+	
+	LastSeenPlayerState = PlayerState;
+}
+
+void AActPlayerController::OnPlayerStateChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam)
+{
+	ConditionalBroadcastTeamChanged(this, IntegerToGenericTeamId(OldTeam), IntegerToGenericTeamId(NewTeam));
+}
+
 void AActPlayerController::RegisterAbilityChainWindow(
 	const FName WindowId,
 	const TArray<FActAbilityChainEntry>& ChainEntries)
@@ -218,4 +360,9 @@ void AActPlayerController::ClearAbilityChainCache()
 	{
 		ComboRuntime->Reset();
 	}
+}
+
+void AActPlayerController::OnPlayerStateChanged()
+{
+	// Empty, place for derived classes to implement without having to hook all the other events
 }
