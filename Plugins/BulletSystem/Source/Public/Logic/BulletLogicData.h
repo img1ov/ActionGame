@@ -6,12 +6,13 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "BulletSystemTypes.h"
+#include "Runtime/Engine/Classes/Engine/DataAsset.h"
 #include "BulletLogicData.generated.h"
 
 class UBulletLogicController;
 
-UCLASS(Abstract, BlueprintType)
-class BULLETGAME_API UBulletLogicData : public UDataAsset
+UCLASS(BlueprintType)
+class BULLETGAME_API UBulletLogicData : public UPrimaryDataAsset
 {
     GENERATED_BODY()
 
@@ -22,5 +23,3 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
     TSubclassOf<UBulletLogicController> ControllerClass;
 };
-
-

@@ -391,7 +391,8 @@ int32 UBulletController::ApplyDamageToOverlaps(int32 BulletId, bool bResetHitAct
 
         if (const float* LastHit = Info->CollisionInfo.HitActors.Find(HitActor))
         {
-            if (HitInterval <= 0.0f || (WorldTime - *LastHit) < HitInterval)
+            // HitInterval <= 0 means "no gating" (hit every time).
+            if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
             {
                 continue;
             }

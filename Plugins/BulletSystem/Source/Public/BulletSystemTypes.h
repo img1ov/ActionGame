@@ -263,7 +263,7 @@ struct FBulletDataMove
 
     /** Spawn position offset (cm). Applied in owner space or world space depending on bSpawnOffsetInOwnerSpace. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    FVector SpawnOffset = FVector::ZeroVector;
+    FVector SpawnLocationOffset = FVector::ZeroVector;
 
     /** If true, SpawnOffset is interpreted in owner local space; otherwise in world space. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
@@ -459,7 +459,7 @@ struct FBulletDataMain : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
     EBulletConfigProfile ConfigProfile = EBulletConfigProfile::Projectile;
 
-    // Tracks the last profile applied for editor auto-fill.
+    /** Tracks the last profile applied for editor auto-fill (editor-only helper; not used at runtime). */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Main", AdvancedDisplay, meta = (HideInDetailPanel))
     EBulletConfigProfile AppliedProfile = EBulletConfigProfile::Custom;
 
@@ -690,4 +690,3 @@ struct FBulletActionInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     int32 InheritTarget = -1;
 };
-

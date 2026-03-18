@@ -108,7 +108,7 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
         SpawnRotation = BulletInfo.InitParams.Owner->GetActorRotation();
     }
 
-    FVector ConfigOffset = BulletInfo.Config.Move.SpawnOffset;
+    FVector ConfigOffset = BulletInfo.Config.Move.SpawnLocationOffset;
     if (BulletInfo.Config.Move.bSpawnOffsetInOwnerSpace)
     {
         ConfigOffset = SpawnRotation.RotateVector(ConfigOffset);

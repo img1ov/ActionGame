@@ -5,6 +5,7 @@
 #include "Logic/BulletLogicControllers.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
+#include "BulletLogChannel.h"
 
 void UBulletActionLogicComponent::Initialize(UBulletController* InController, UBulletEntity* InEntity, const FBulletDataExecution& ExecutionData)
 {
@@ -32,6 +33,7 @@ void UBulletActionLogicComponent::Initialize(UBulletController* InController, UB
     {
         if (!LogicDataPtr.ToSoftObjectPath().IsValid())
         {
+            UE_LOG(LogBullet, VeryVerbose, TEXT("BulletLogic: skip invalid LogicData soft path."));
             continue;
         }
 
@@ -43,12 +45,17 @@ void UBulletActionLogicComponent::Initialize(UBulletController* InController, UB
 
         if (!LogicData || !LogicData->ControllerClass)
         {
+            UE_LOG(LogBullet, Warning, TEXT("BulletLogic: failed to load LogicData or ControllerClass missing. Asset=%s"),
+                *LogicDataPtr.ToSoftObjectPath().ToString());
             continue;
         }
 
         UBulletLogicController* LogicController = NewObject<UBulletLogicController>(this, LogicData->ControllerClass);
         if (!LogicController)
         {
+            UE_LOG(LogBullet, Warning, TEXT("BulletLogic: failed to create controller. Class=%s Asset=%s"),
+                *GetNameSafe(LogicData->ControllerClass.Get()),
+                *LogicDataPtr.ToSoftObjectPath().ToString());
             continue;
         }
 

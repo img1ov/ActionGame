@@ -186,3 +186,249 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 - Action 顺序：新增 Action 必须保证与现有生命周期一致。
 - LogicData 扩展：特殊玩法优先通过 Controller 扩展。
 - 性能：高频路径必须避免动态分配与复杂分支。
+
+## 13. 关键链路（详细）
+
+### 13.1 创建子弹链路（从调用到入模）
+
+1. Gameplay 侧调用
+   - C++: `UActAbilitySystemComponent::CreateBullet()`
+   - BP: `UBulletBlueprintLibrary::CreateBullet()`
+2. `UBulletWorldSubsystem` 获取 `UBulletController` 并调用 `CreateBullet()`
+3. Controller 解析配置
+   - `UBulletConfigSubsystem::GetBulletData(BulletID, OutData, Owner)`
+4. Model 创建运行态
+   - `UBulletModel::CreateBullet()` 生成 `BulletId`
+   - 从 `UBulletPool` 复用/创建 `UBulletEntity`
+   - 写入 `FBulletInfo.InitParams / Config / Size / Parent` 等
+5. 入队生命周期 Action
+   - `EnqueueAction(BulletId, InitBullet)`
+
+### 13.2 InitBullet 初始化流水线（动作链）
+
+`InitBullet` 会做：
+
+- 计算并缓存 `bIsSimple = Config.CheckSimpleBullet()`
+- 初始化 Budget 组件（高频降采样）
+- 合并 Tags（Config.Base.Tags + Config.Logic.LogicTags + runtime tags）
+- 如果不是 Simple 且有 LogicComponent：
+  - `LogicComponent.Initialize(Execution.LogicDataList)`
+- 入队后续动作（顺序固定）
+  - `InitHit -> InitMove -> InitCollision -> InitRender -> ... -> AfterInit`
+
+### 13.3 Tick 顺序（Subsystem -> Controller -> System/Action）
+
+`UBulletWorldSubsystem::Tick()`：
+
+1. `Controller.OnTick(DeltaSeconds)`
+2. `Controller.OnAfterTick(DeltaSeconds)`
+
+Controller 内部顺序（重要）：
+
+1. Pause ActionRunner（避免 Action 队列迭代时被修改）
+2. `MoveSystem.OnTick()`
+3. `CollisionSystem.OnTick()`
+4. Resume ActionRunner，执行动作队列（Init/Destroy/Delay 等）
+5. AfterTick：FlushDestroyedBullets（回收 Actor/Entity，移除 Model 条目）
+
+## 14. 碰撞与命中（最容易踩坑的部分）
+
+BulletSystem 的碰撞不是基于 `UBoxComponent/USphereComponent`，而是每 tick 做 scene query：
+
+- `CollisionMode = Sweep`：`SweepMultiByChannel(...)`
+- `CollisionMode = Overlap`：`OverlapMultiByChannel(...)`
+- `Shape = Ray`：`LineTraceMultiByChannel(...)`
+- `Shape = Sphere/Box/Capsule`：使用对应的 `FCollisionShape::Make*`
+
+### 14.1 Auto vs Manual（为什么你看到红框但 OnHit 不触发）
+
+`Base.HitTrigger` 决定是否自动派发命中逻辑：
+
+- `HitTrigger = Auto`
+  - CollisionSystem 在检测到命中后会调用 `Controller->HandleHitResult(...)`
+  - 进而触发 Logic 链：`LogicController.OnHit(...)`
+
+- `HitTrigger = Manual`
+  - CollisionSystem 只会把命中的 Actor 收集到 `BulletInfo.CollisionInfo.OverlapActors`
+  - 并不会派发 `HandleHitResult`，因此不会触发 OnHit
+  - 正确用法：在你需要结算的时机调用 `UBulletBlueprintLibrary::ApplyDamageToOverlaps(BulletId, ...)`
+
+这也是 HitBox profile 的默认设计：HitBox = Overlap + Manual，适合“攻击帧/节奏点”手动结算。
+
+### 14.2 HitInterval（重复命中间隔）
+
+- `Base.HitInterval <= 0`：不做间隔限制，允许每次都命中。
+- `Base.HitInterval > 0`：同一个 Actor 两次命中之间必须间隔 >= HitInterval。
+
+注意：HitInterval 只对“同一个 Actor 的重复命中”生效，不影响第一次命中。
+
+### 14.3 CollisionStartDelay（开火保护期）
+
+`Base.CollisionStartDelay` 用于避免 muzzle 出口/贴脸时立刻碰撞：
+
+- 未到时间：CollisionSystem 直接跳过该 bullet 的碰撞查询，并清空 OverlapActors。
+
+## 15. 逻辑扩展（LogicData + Controller）
+
+### 15.1 初始化条件（为什么有些逻辑永远不触发）
+
+逻辑触发依赖两件事：
+
+1. 配置层必须让 bullet 不是 simple：
+   - `Execution.LogicDataList` 非空，或存在 Children/Summon/Interact/Obstacle 等
+2. `LogicData` 能被加载且 `ControllerClass` 正确：
+   - 软引用路径无效、资产未 cook、ControllerClass 未设置都会导致控制器未创建
+
+建议打开日志：
+
+- `LogBullet=Verbose` 或 `VeryVerbose`
+
+### 15.2 Trigger 语义
+
+- `OnBegin`：AfterInit 阶段调用（更接近“子弹开始工作”）
+- `OnHit`：只有 Auto hit 才会触发；Manual hit 需要通过 ApplyDamageToOverlaps 才会触发
+- `ReplaceMove`：可替换默认移动（返回 true 则跳过默认 move）
+- `Tick`：跟随 MoveSystem 的节奏更新（受 TimeScale/Budget 影响）
+
+### 15.3 蓝图扩展（Blueprint Controller 实操）
+
+BulletSystem 对蓝图开放的推荐扩展基类是：
+
+- `UBulletLogicControllerBlueprintBase`
+
+它会在 C++ 侧收到触发后，转发到蓝图可覆写的 `K2_*` 函数。
+
+#### 15.3.1 最小接入步骤
+
+1. 新建一个蓝图类，父类选择 `UBulletLogicControllerBlueprintBase`
+2. 在蓝图里覆写你需要的事件/函数
+   - `Event OnBegin`
+   - `Event OnHit`
+   - `Event OnDestroy`
+   - `Event Tick`
+   - `Override ReplaceMove` (返回 bool)
+   - `Override FilterHit` (返回 bool)
+3. 新建一个 `UBulletLogicData`（`PrimaryDataAsset`）
+   - `Trigger = OnHit/OnBegin/...`
+   - `ControllerClass = 你刚才的蓝图 Controller`
+4. 在子弹配置（DataTable 行或配置资产）里，把该 LogicData 加到：
+   - `Execution.LogicDataList`
+
+只要 `Execution.LogicDataList` 非空，该子弹就不会走 simple fast-path，逻辑就会被初始化并参与触发。
+
+#### 15.3.2 事件参数的注意事项（by-ref 陷阱）
+
+- `OnBegin/OnHit/OnDestroy/Tick/...` 这些 **事件** 的 `BulletInfo` 以 `const FBulletInfo&` 形式传入。
+  - 这是刻意设计：蓝图 Event 无法“按引用回写”参数，否则会出现类似 “No value will be returned by reference” 的警告。
+  - 结论：不要试图在 `Event OnHit` 里修改 `BulletInfo` 来影响后续系统。
+
+- 需要“修改子弹运行态”的场景，请用 **可返回值的 override**：
+  - `ReplaceMove(ref BulletInfo, DeltaSeconds) -> bool`
+    - 返回 `true` 表示你完全接管移动，MoveSystem 将跳过默认移动
+    - 你可以修改 `BulletInfo.MoveInfo.Location/Velocity/...` 来驱动轨迹
+  - `FilterHit(ref BulletInfo, Hit) -> bool`
+    - 返回 `false` 则本次命中会被忽略（不会进入 HandleHitResult / 不会触发 OnHit 链）
+
+#### 15.3.3 OnHit 触发的前提（Auto vs Manual）
+
+你在场景里看到调试框变红，只说明“查询命中”，不代表会触发 `OnHit`：
+
+- `Base.HitTrigger = Auto`
+  - 系统会对每个命中调用 `HandleHitResult`，从而触发 `OnHit`
+- `Base.HitTrigger = Manual`
+  - 系统只会把命中缓存到 `BulletInfo.CollisionInfo.OverlapActors`
+  - 此时不会触发 `OnHit`
+  - 你需要在合适的时机调用 `ApplyDamageToOverlaps` 才会逐个派发命中处理
+
+HitBox profile 默认就是 Manual，适合“攻击帧结算”。
+
+#### 15.3.4 常见蓝图“没触发”的排查顺序
+
+1. 子弹行里 `Execution.LogicDataList` 是否真的填了该 LogicData
+2. LogicData 的 `ControllerClass` 是否设置，且能被运行时加载（软引用路径有效）
+3. `Trigger` 是否选对（比如你写了 OnHit 但 Trigger 还是 OnBegin）
+4. `HitTrigger` 是否为 Manual（Manual 下 OnHit 不会自动触发）
+5. `CollisionStartDelay` 是否导致前几帧碰撞被跳过
+6. 是否被 `FilterHit` 过滤掉（返回 false）
+
+建议把 `LogBullet` 调到 `Verbose` 或 `VeryVerbose`，并关注 `BulletLogic:` 前缀的日志（LogicData 加载失败时会有提示）。
+
+#### 15.3.5 蓝图里应用 GE/伤害（推荐姿势）
+
+在 `Event OnHit` 里做 GE 通常比在 Execution 里“反查子弹”更稳定：
+
+- Source（伤害来源）：`BulletInfo.InitParams.Owner`
+- Target（受击目标）：`Hit.GetActor()`（为空时再 fallback 到 `BulletInfo.InitParams.TargetActor`）
+- 伤害数值：用 `SetByCaller` 或 GE 自己捕获属性
+
+注意网络侧：如果你的子弹只在 Server 创建，那么蓝图 OnHit 的打印/Apply 也只会发生在 Server（客户端只会看到表现，不会有逻辑回调）。
+
+#### 15.3.6 Manual HitBox 的“攻击帧结算”模板
+
+当 `Base.HitTrigger = Manual` 时，你可以把 HitBox 当成“持续收集碰撞的传感器”，然后在攻击帧调用：
+
+- `UBulletBlueprintLibrary::ApplyDamageToOverlaps(WorldContext, BulletId, bResetHitActorsBefore, bApplyCollisionResponse)`
+
+它会把当前收集到的 `OverlapActors` 逐个走 `HandleHitResult`，从而触发 `OnHit` 逻辑链。
+
+#### 15.3.7 蓝图可用 API 速查（BulletBlueprintLibrary）
+
+- `CreateBullet(WorldContext, ConfigAsset, BulletID, InitParams) -> BulletId`
+- `DestroyBullet(WorldContext, BulletId, Reason, bSpawnChildren)`
+- `IsBulletValid(WorldContext, BulletId)`
+- `SetBulletCollisionEnabled(WorldContext, BulletId, bEnabled, bClearOverlaps, bResetHitActors)`
+- `ResetBulletHitActors(WorldContext, BulletId)`
+- `ApplyDamageToOverlaps(WorldContext, BulletId, bResetHitActorsBefore, bApplyCollisionResponse) -> AppliedCount`
+
+## 16. 配置案例
+
+### 16.1 典型 Projectile（扫掠命中，自动触发）
+
+- `ConfigProfile = Projectile`
+- `Base.Shape = Sphere`
+- `Base.CollisionMode = Sweep`
+- `Base.HitTrigger = Auto`
+- `Base.CollisionChannel = WorldDynamic`（按需）
+- `Base.bDestroyOnHit = true`
+- `Base.MaxHitCount = 1`
+
+执行链路：Create -> Init -> MoveTick -> SweepHit -> HandleHitResult -> OnHit -> Destroy
+
+### 16.2 典型 HitBox（重叠采集，手动结算）
+
+- `ConfigProfile = HitBox`
+- `Base.Shape = Box`
+- `Base.CollisionMode = Overlap`
+- `Base.HitTrigger = Manual`
+- `Base.CollisionChannel = Pawn`（按需）
+- `Base.bDestroyOnHit = false`
+- `Base.MaxHitCount = 999`
+
+执行链路：Create -> Init -> OverlapCollect(红框) -> 你在攻击帧调用 ApplyDamageToOverlaps -> HandleHitResult -> OnHit
+
+### 16.3 射线武器（Ray）
+
+- `Base.Shape = Ray`
+- `Base.CollisionMode = Sweep`（对 Ray 等价于 LineTrace）
+- `Base.HitTrigger = Auto` 或 `Manual`
+
+注意：Ray 模式下 `FBulletRayInfo.TraceStart/TraceEnd` 会记录最近一次 trace。
+
+## 17. 测试与调试清单
+
+### 17.1 最小化验证
+
+1. 开启 debug draw（如果 Controller 支持）
+2. 将 `LogBullet=Verbose`
+3. 用一个固定目标（放一个 Box/StaticMeshActor）验证：
+   - Sweep 模式：是否产生 Hits
+   - Overlap 模式：是否产生 Overlaps
+4. 验证 `HitTrigger`：
+   - Auto：是否触发 OnHit
+   - Manual：是否需要手动 ApplyDamageToOverlaps 才触发 OnHit
+
+### 17.2 常见问题定位
+
+- 红框但没有 OnHit：检查 `Base.HitTrigger` 是否为 Manual
+- OnHit 没触发且 bullet 似乎是 simple：检查 `Execution.LogicDataList` 是否真的写到了该 bullet 行
+- LogicData 不生效：检查软引用资产是否可加载、`ControllerClass` 是否设置、是否被 cook

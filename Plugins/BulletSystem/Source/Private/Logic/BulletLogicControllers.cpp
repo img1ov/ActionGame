@@ -2,7 +2,7 @@
 // Logic data assets and controllers.
 #include "Logic/BulletLogicControllers.h"
 #include "Logic/BulletLogicControllerTypes.h"
-#include "Logic/BulletLogicBlueprintController.h"
+#include "Logic/BulletLogicControllerBlueprintBase.h"
 #include "Logic/BulletLogicDataTypes.h"
 #include "Controller/BulletController.h"
 #include "Model/BulletInfo.h"
@@ -215,146 +215,145 @@ void UBulletLogicApplyGEController::OnEffectApplied_Implementation(const FBullet
 }
 
 // Blueprint extension hooks (K2_*) for custom logic.
-void UBulletLogicBlueprintController::OnBegin(FBulletInfo& BulletInfo)
+void UBulletLogicControllerBlueprintBase::OnBegin(FBulletInfo& BulletInfo)
 {
     K2_OnBegin(BulletInfo);
 }
 
-void UBulletLogicBlueprintController::OnHit(FBulletInfo& BulletInfo, const FHitResult& Hit)
+void UBulletLogicControllerBlueprintBase::OnHit(FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     K2_OnHit(BulletInfo, Hit);
 }
 
-void UBulletLogicBlueprintController::OnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
+void UBulletLogicControllerBlueprintBase::OnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
 {
     K2_OnDestroy(BulletInfo, Reason);
 }
 
-void UBulletLogicBlueprintController::OnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit)
+void UBulletLogicControllerBlueprintBase::OnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     K2_OnRebound(BulletInfo, Hit);
 }
 
-void UBulletLogicBlueprintController::OnSupport(FBulletInfo& BulletInfo)
+void UBulletLogicControllerBlueprintBase::OnSupport(FBulletInfo& BulletInfo)
 {
     K2_OnSupport(BulletInfo);
 }
 
-void UBulletLogicBlueprintController::OnHitBullet(FBulletInfo& BulletInfo, int32 OtherBulletId)
+void UBulletLogicControllerBlueprintBase::OnHitBullet(FBulletInfo& BulletInfo, int32 OtherBulletId)
 {
     K2_OnHitBullet(BulletInfo, OtherBulletId);
 }
 
-void UBulletLogicBlueprintController::Tick(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::Tick(FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     K2_Tick(BulletInfo, DeltaSeconds);
 }
 
-bool UBulletLogicBlueprintController::ReplaceMove(FBulletInfo& BulletInfo, float DeltaSeconds)
+bool UBulletLogicControllerBlueprintBase::ReplaceMove(FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     return K2_ReplaceMove(BulletInfo, DeltaSeconds);
 }
 
-void UBulletLogicBlueprintController::OnPreMove(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::OnPreMove(FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     K2_OnPreMove(BulletInfo, DeltaSeconds);
 }
 
-void UBulletLogicBlueprintController::OnPostMove(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::OnPostMove(FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     K2_OnPostMove(BulletInfo, DeltaSeconds);
 }
 
-void UBulletLogicBlueprintController::OnPreCollision(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
+void UBulletLogicControllerBlueprintBase::OnPreCollision(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
 {
     K2_OnPreCollision(BulletInfo, Hits);
 }
 
-void UBulletLogicBlueprintController::OnPostCollision(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
+void UBulletLogicControllerBlueprintBase::OnPostCollision(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
 {
     K2_OnPostCollision(BulletInfo, Hits);
 }
 
-bool UBulletLogicBlueprintController::FilterHit(FBulletInfo& BulletInfo, const FHitResult& Hit)
+bool UBulletLogicControllerBlueprintBase::FilterHit(FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     return K2_FilterHit(BulletInfo, Hit);
 }
 
-void UBulletLogicBlueprintController::K2_OnBegin_Implementation(FBulletInfo& BulletInfo)
+void UBulletLogicControllerBlueprintBase::K2_OnBegin_Implementation(const FBulletInfo& BulletInfo)
 {
     (void)BulletInfo;
 }
 
-void UBulletLogicBlueprintController::K2_OnHit_Implementation(FBulletInfo& BulletInfo, const FHitResult& Hit)
+void UBulletLogicControllerBlueprintBase::K2_OnHit_Implementation(const FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     (void)BulletInfo;
     (void)Hit;
 }
 
-void UBulletLogicBlueprintController::K2_OnDestroy_Implementation(FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
+void UBulletLogicControllerBlueprintBase::K2_OnDestroy_Implementation(const FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
 {
     (void)BulletInfo;
     (void)Reason;
 }
 
-void UBulletLogicBlueprintController::K2_OnRebound_Implementation(FBulletInfo& BulletInfo, const FHitResult& Hit)
+void UBulletLogicControllerBlueprintBase::K2_OnRebound_Implementation(const FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     (void)BulletInfo;
     (void)Hit;
 }
 
-void UBulletLogicBlueprintController::K2_OnSupport_Implementation(FBulletInfo& BulletInfo)
+void UBulletLogicControllerBlueprintBase::K2_OnSupport_Implementation(const FBulletInfo& BulletInfo)
 {
     (void)BulletInfo;
 }
 
-void UBulletLogicBlueprintController::K2_OnHitBullet_Implementation(FBulletInfo& BulletInfo, int32 OtherBulletId)
+void UBulletLogicControllerBlueprintBase::K2_OnHitBullet_Implementation(const FBulletInfo& BulletInfo, int32 OtherBulletId)
 {
     (void)BulletInfo;
     (void)OtherBulletId;
 }
 
-void UBulletLogicBlueprintController::K2_Tick_Implementation(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::K2_Tick_Implementation(const FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     (void)BulletInfo;
     (void)DeltaSeconds;
 }
 
-bool UBulletLogicBlueprintController::K2_ReplaceMove_Implementation(FBulletInfo& BulletInfo, float DeltaSeconds)
+bool UBulletLogicControllerBlueprintBase::K2_ReplaceMove_Implementation(FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     (void)BulletInfo;
     (void)DeltaSeconds;
     return false;
 }
 
-void UBulletLogicBlueprintController::K2_OnPreMove_Implementation(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::K2_OnPreMove_Implementation(const FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     (void)BulletInfo;
     (void)DeltaSeconds;
 }
 
-void UBulletLogicBlueprintController::K2_OnPostMove_Implementation(FBulletInfo& BulletInfo, float DeltaSeconds)
+void UBulletLogicControllerBlueprintBase::K2_OnPostMove_Implementation(const FBulletInfo& BulletInfo, float DeltaSeconds)
 {
     (void)BulletInfo;
     (void)DeltaSeconds;
 }
 
-void UBulletLogicBlueprintController::K2_OnPreCollision_Implementation(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
+void UBulletLogicControllerBlueprintBase::K2_OnPreCollision_Implementation(const FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
 {
     (void)BulletInfo;
     (void)Hits;
 }
 
-void UBulletLogicBlueprintController::K2_OnPostCollision_Implementation(FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
+void UBulletLogicControllerBlueprintBase::K2_OnPostCollision_Implementation(const FBulletInfo& BulletInfo, const TArray<FHitResult>& Hits)
 {
     (void)BulletInfo;
     (void)Hits;
 }
 
-bool UBulletLogicBlueprintController::K2_FilterHit_Implementation(FBulletInfo& BulletInfo, const FHitResult& Hit)
+bool UBulletLogicControllerBlueprintBase::K2_FilterHit_Implementation(FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     (void)BulletInfo;
     (void)Hit;
     return true;
 }
-

@@ -271,7 +271,8 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     // HitInterval gates repeated hits on the same actor (DoT / multi-hit projectiles).
                     if (const float* LastHit = Info.CollisionInfo.HitActors.Find(HitActor))
                     {
-                        if (HitInterval <= 0.0f || (WorldTime - *LastHit) < HitInterval)
+                        // HitInterval <= 0 means "no gating" (hit every time).
+                        if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
                         {
                             continue;
                         }
@@ -438,7 +439,8 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             // HitInterval gates repeated hits on the same actor (DoT / multi-hit projectiles).
             if (const float* LastHit = Info.CollisionInfo.HitActors.Find(HitActor))
             {
-                if (HitInterval <= 0.0f || (WorldTime - *LastHit) < HitInterval)
+                // HitInterval <= 0 means "no gating" (hit every time).
+                if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
                 {
                     continue;
                 }
