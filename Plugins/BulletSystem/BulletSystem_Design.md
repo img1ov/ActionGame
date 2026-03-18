@@ -268,6 +268,44 @@ BulletSystem 的碰撞不是基于 `UBoxComponent/USphereComponent`，而是每 
 
 - 未到时间：CollisionSystem 直接跳过该 bullet 的碰撞查询，并清空 OverlapActors。
 
+### 14.4 场景交互（Interact / SceneInteract）
+
+Interact 是“命中某些场景 Actor 时触发额外交互逻辑”的扩展点，典型用于可破坏物、机关、场景触发器等。
+
+#### 14.4.1 配置入口
+
+`FBulletDataMain.Interact`（`FBulletDataInteract`）当前只有两个开关：
+
+- `bEnableInteract`：是否启用交互链路
+- `bAffectEnvironment`：是否允许影响环境（当前实现里它也会作为触发 `OnBulletInteract` 的门槛）
+
+#### 14.4.2 启用链路（Action 阶段）
+
+当 `Interact.bEnableInteract` 或 `Obstacle.bEnableObstacle` 为 true 时，`InitBullet` 会入队 `SceneInteract` Action。
+
+`SceneInteract` Action 目前做的事情是：
+
+- 给子弹打上 tag：`Bullet.Interact`（如果该 tag 在项目 GameplayTags 里存在）
+
+这个 tag 是预留扩展点，便于后续在逻辑/筛选/统计里识别“具备交互意图”的子弹。
+
+#### 14.4.3 触发点（命中阶段）
+
+实际触发发生在 `UBulletController::HandleHitResult(...)`：
+
+- 条件：`Interact.bEnableInteract && Interact.bAffectEnvironment && HitActor != null`
+- 如果 `HitActor` 实现了 `UBulletInteractInterface`
+  - 调用 `OnBulletInteract(BulletInfo, Hit)`
+
+注意：该回调发生在碰撞响应（Destroy/Bounce/Pierce/Support）之前，也发生在 `RequestSummonChildren(OnHit)` 之前。
+
+#### 14.4.4 预留扩展点
+
+- 目标 Actor 侧扩展：实现 `UBulletInteractInterface`（C++ 或蓝图）即可接入交互回调
+- Bullet 侧扩展：
+  - 继续扩展 `FBulletDataInteract`（例如：InteractTags、只对特定 ActorClass 生效、触发次数限制、触发时机 OnHit/OnDestroy 等）
+  - 或新增独立 Action/LogicController，把交互从 `HandleHitResult` 中拆出来（更易测试与组合）
+
 ## 15. 逻辑扩展（LogicData + Controller）
 
 ### 15.1 初始化条件（为什么有些逻辑永远不触发）
