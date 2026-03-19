@@ -51,9 +51,9 @@ public:
     void OnAfterTick(float DeltaSeconds) const;
 
     // Spawn a bullet by BulletID from config asset or subsystem.
-    bool CreateBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig = nullptr) const;
+    bool SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig = nullptr) const;
     // Spawn using a pre-resolved config struct.
-    bool CreateBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const;
+    bool SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const;
 
     // Queue a lifecycle action for deterministic execution order.
     void EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const;
@@ -65,8 +65,8 @@ public:
     // Runtime collision toggles and hit-cache management.
     bool SetCollisionEnabled(int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const;
     bool ResetHitActors(int32 BulletId) const;
-    // Manual hit trigger: apply hit logic to stored overlaps.
-    int32 ApplyDamageToOverlaps(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
+    // Manual-hit trigger: process stored overlaps as hits (fires OnHit logic chain, interact, collision response).
+    int32 ProcessManualHits(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
 
     // Resolve a hit and apply response (logic hooks, interact, destroy/bounce/support).
     bool HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse) const;

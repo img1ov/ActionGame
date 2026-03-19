@@ -4,8 +4,9 @@
 // Logic data assets and controllers.
 
 #include "CoreMinimal.h"
+#include "BulletLogicController.h"
 #include "Engine/EngineTypes.h"
-#include "Logic/BulletLogicControllers.h"
+
 #include "BulletLogicControllerBlueprintBase.generated.h"
 
 UCLASS(Blueprintable)

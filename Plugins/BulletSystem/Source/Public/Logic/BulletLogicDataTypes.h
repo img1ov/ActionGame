@@ -125,14 +125,14 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataApplyGE : public UBulletLogicData
+class BULLETGAME_API UBulletLogicData_ApplyGameplayEffect : public UBulletLogicData
 {
     GENERATED_BODY()
 
 public:
-    UBulletLogicDataApplyGE();
+    UBulletLogicData_ApplyGameplayEffect();
 
-    // GameplayEffect to apply on hit (used by Blueprint implementation).
+    // GameplayEffect to apply on hit.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
     TSubclassOf<UGameplayEffect> GameplayEffect;
 

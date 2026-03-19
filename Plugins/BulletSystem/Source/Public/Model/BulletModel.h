@@ -18,7 +18,7 @@ class BULLETGAME_API UBulletModel : public UObject
 public:
     // Runtime store for active bullets and their state.
     void Reserve(int32 Capacity);
-    FBulletInfo* CreateBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config);
+    FBulletInfo* SpawnBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config);
     FBulletInfo* GetBullet(int32 BulletId);
     const TMap<int32, FBulletInfo>& GetBulletMap() const;
     TMap<int32, FBulletInfo>& GetMutableBulletMap();

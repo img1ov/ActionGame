@@ -164,7 +164,7 @@ struct FBulletInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     int32 BulletId = INDEX_NONE;
 
-    // Spawn parameters captured at creation time (owner/target/transform/ability ids).
+    // Spawn parameters captured at creation time (owner/target/transform/ability ids, payload).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     FBulletInitParams InitParams;
 

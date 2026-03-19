@@ -6,6 +6,7 @@
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilityTagRelationshipMapping.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
+#include "Abilities/GameplayAbility.h"
 #include "Animation/ActAnimInstance.h"
 #include "Blueprint/BulletBlueprintLibrary.h"
 #include "Character/ActPawnData.h"
@@ -50,9 +51,11 @@ void UActAbilitySystemComponent::CancelAbilitiesByFunc(const TShouldCancelAbilit
 			continue;
 		}
 
-		PRAGMA_DISABLE_DEPRECATION_WARNINGS
-		ensureMsgf(AbilitySpec.Ability->GetInstancingPolicy() != EGameplayAbilityInstancingPolicy::NonInstanced, TEXT("CancelAbilitiesByFunc: All Abilities should be Instanced (NonInstanced is being deprecated due to usability issues)."));
-		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+		// NonInstanced is deprecated in newer UE versions. Enforce an instanced policy without referencing the deprecated enumerator.
+		const EGameplayAbilityInstancingPolicy::Type Policy = AbilitySpec.Ability->GetInstancingPolicy();
+		ensureMsgf(
+			Policy == EGameplayAbilityInstancingPolicy::InstancedPerActor || Policy == EGameplayAbilityInstancingPolicy::InstancedPerExecution,
+			TEXT("CancelAbilitiesByFunc: All Abilities should be instanced (InstancedPerActor/InstancedPerExecution)."));
 
 		// Cancel all the spawned instances.
 		TArray<UGameplayAbility*> Instances = AbilitySpec.GetAbilityInstances();
@@ -480,7 +483,7 @@ void UActAbilitySystemComponent::K2_AbilityInputTagReleased(const FGameplayTag I
 	AbilityInputTagReleased(InputTag);
 }
 
-int32 UActAbilitySystemComponent::CreateBullet(FName BulletID, const FBulletInitParams& InitParams) const
+int32 UActAbilitySystemComponent::SpawnBullet(FName BulletID, const FBulletInitParams& InitParams) const
 {
 	const AActPlayerState* ActPS = Cast<AActPlayerState>(GetOwnerActor());
 	if (!ActPS) return  INDEX_NONE;
@@ -488,13 +491,14 @@ int32 UActAbilitySystemComponent::CreateBullet(FName BulletID, const FBulletInit
 	const UActPawnData* PawnData = ActPS->GetPawnData<UActPawnData>();
 	if (!PawnData) return  INDEX_NONE;
 	
-	return UBulletBlueprintLibrary::CreateBullet(ActPS, PawnData->BulletConfig, BulletID, InitParams);
+	return UBulletBlueprintLibrary::SpawnBullet(ActPS, PawnData->BulletConfig, BulletID, InitParams);
 }
 
-int32 UActAbilitySystemComponent::K2_CreateBullet(FName BulletID, const FBulletInitParams& InitParams)
+int32 UActAbilitySystemComponent::K2_SpawnBullet(FName BulletID, const FBulletInitParams& InitParams)
 {
-	return CreateBullet(BulletID, InitParams);
+	return SpawnBullet(BulletID, InitParams);
 }
+
 
 void UActAbilitySystemComponent::TryActivateAbilitiesOnSpawn()
 {
@@ -741,12 +745,17 @@ void UActAbilitySystemComponent::AbilitySpecInputPressed(FGameplayAbilitySpec& S
 	// Use replicated events instead so that the WaitInputPress ability task works.
 	if (Spec.IsActive())
 	{
-		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		const UGameplayAbility* Instance = Spec.GetPrimaryInstance();
+		if (!Instance)
+		{
+			// InstancedPerExecution may not have a "primary" instance. Fall back to any active instance.
+			const TArray<UGameplayAbility*> Instances = Spec.GetAbilityInstances();
+			Instance = Instances.Num() > 0 ? Instances[0] : nullptr;
+		}
+
 		const FPredictionKey OriginalPredictionKey = Instance
 			? Instance->GetCurrentActivationInfo().GetActivationPredictionKey()
-			: Spec.ActivationInfo.GetActivationPredictionKey();
-		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+			: FPredictionKey();
 
 		// Invoke the InputPressed event. This is not replicated here. If someone is listening, they may replicate the InputPressed event to the server.
 		InvokeReplicatedEvent(EAbilityGenericReplicatedEvent::InputPressed, Spec.Handle, OriginalPredictionKey);
@@ -761,12 +770,16 @@ void UActAbilitySystemComponent::AbilitySpecInputReleased(FGameplayAbilitySpec& 
 	// Use replicated events instead so that the WaitInputRelease ability task works.
 	if (Spec.IsActive())
 	{
-		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		const UGameplayAbility* Instance = Spec.GetPrimaryInstance();
+		if (!Instance)
+		{
+			const TArray<UGameplayAbility*> Instances = Spec.GetAbilityInstances();
+			Instance = Instances.Num() > 0 ? Instances[0] : nullptr;
+		}
+
 		const FPredictionKey OriginalPredictionKey = Instance
 			? Instance->GetCurrentActivationInfo().GetActivationPredictionKey()
-			: Spec.ActivationInfo.GetActivationPredictionKey();
-		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+			: FPredictionKey();
 
 		// Invoke the InputReleased event. This is not replicated here. If someone is listening, they may replicate the InputReleased event to the server.
 		InvokeReplicatedEvent(EAbilityGenericReplicatedEvent::InputReleased, Spec.Handle, OriginalPredictionKey);

@@ -173,7 +173,7 @@ void UBulletController::OnAfterTick(float DeltaSeconds) const
 }
 
 // Resolve config by BulletID and enqueue initial actions.
-bool UBulletController::CreateBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig) const
+bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig) const
 {
     if (BulletID.IsNone())
     {
@@ -198,12 +198,12 @@ bool UBulletController::CreateBullet(const FBulletInitParams& InitParams, FName 
         return false;
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("CreateBullet: BulletID=%s Owner=%s"), *BulletID.ToString(), InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"));
-    return CreateBulletByData(InitParams, Data, OutBulletId);
+    UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s"), *BulletID.ToString(), InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"));
+    return SpawnBulletByData(InitParams, Data, OutBulletId);
 }
 
 // Allocate a bullet entry and enqueue its init action.
-bool UBulletController::CreateBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const
+bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const
 {
     if (!Model)
     {
@@ -211,7 +211,7 @@ bool UBulletController::CreateBulletByData(const FBulletInitParams& InitParams, 
     }
 
     // Allocate from pool to avoid frequent memory churn.
-    FBulletInfo* Info = Model->CreateBullet(BulletPool, InitParams, Data);
+    FBulletInfo* Info = Model->SpawnBullet(BulletPool, InitParams, Data);
     if (!Info)
     {
         return false;
@@ -342,7 +342,7 @@ bool UBulletController::ResetHitActors(int32 BulletId) const
     return true;
 }
 
-int32 UBulletController::ApplyDamageToOverlaps(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
+int32 UBulletController::ProcessManualHits(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
 {
     if (!Model)
     {
@@ -529,7 +529,7 @@ void UBulletController::SpawnChildBulletsFromLogic(
         FBulletInitParams ChildParams = BaseParams;
         ChildParams.SpawnTransform = FTransform(ChildRot, ChildLocation);
         int32 ChildId = INDEX_NONE;
-        CreateBullet(ChildParams, ChildBulletID, ChildId);
+        SpawnBullet(ChildParams, ChildBulletID, ChildId);
     }
 }
 
@@ -791,6 +791,7 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     Params.SpawnTransform = ChildTransform;
     Params.ContextId = ParentInfo.InitParams.ContextId;
     Params.AbilityId = ParentInfo.InitParams.AbilityId;
+    Params.Payload = ParentInfo.InitParams.Payload;
     Params.ParentBulletId = ParentInfo.BulletId;
     Params.SyncType = ParentInfo.InitParams.SyncType;
     return Params;

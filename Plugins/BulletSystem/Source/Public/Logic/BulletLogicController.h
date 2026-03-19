@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "BulletSystemTypes.h"
-#include "BulletLogicControllers.generated.h"
+#include "BulletLogicController.generated.h"
 
 class UBulletController;
 class UBulletEntity;
@@ -14,7 +14,7 @@ class UBulletLogicData;
 struct FBulletInfo;
 struct FHitResult;
 
-UCLASS(Abstract)
+UCLASS(Abstract, NotBlueprintable)
 class BULLETGAME_API UBulletLogicController : public UObject
 {
     GENERATED_BODY()

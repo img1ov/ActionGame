@@ -2,7 +2,7 @@
 // Components used by bullet entities/actors.
 #include "Component/BulletActionLogicComponent.h"
 #include "Logic/BulletLogicData.h"
-#include "Logic/BulletLogicControllers.h"
+#include "Logic/BulletLogicController.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "BulletLogChannel.h"

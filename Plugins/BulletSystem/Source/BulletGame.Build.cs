@@ -27,7 +27,6 @@ public class BulletGame : ModuleRules
 			{
 				"Core",
 				"GameplayTags",
-				"GameplayAbilities",
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -38,6 +37,7 @@ public class BulletGame : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
+				"GameplayAbilities",
 				"PhysicsCore",
 				"DeveloperSettings",
 				"Niagara",

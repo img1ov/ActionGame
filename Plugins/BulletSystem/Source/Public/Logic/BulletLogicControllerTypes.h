@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
 #include "Model/BulletInfo.h"
-#include "Logic/BulletLogicControllers.h"
+#include "Logic/BulletLogicController.h"
 #include "Logic/BulletLogicDataTypes.h"
 #include "BulletLogicControllerTypes.generated.h"
 
@@ -87,7 +87,7 @@ public:
 };
 
 UCLASS(Blueprintable)
-class BULLETGAME_API UBulletLogicApplyGEController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicController_ApplyGameplayEffect : public UBulletLogicController
 {
     GENERATED_BODY()
 
@@ -100,7 +100,7 @@ protected:
 
     // Blueprint hook to apply GAS effects (return true if handled).
     UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|GAS")
-    bool ApplyEffectBlueprint(UBulletLogicDataApplyGE* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const;
+    bool ApplyEffectBlueprint(UBulletLogicData_ApplyGameplayEffect* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const;
 
     UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|GAS")
     void OnEffectApplied(const FBulletInfo& BulletInfo, const FHitResult& Hit, bool bSuccess);

@@ -1,3 +1,5 @@
+// BulletSystem: BulletLogicDataTypes.cpp
+// Typed LogicData assets (map data -> controller class + trigger).
 
 #include "Logic/BulletLogicDataTypes.h"
 
@@ -51,9 +53,9 @@ UBulletLogicDataShield::UBulletLogicDataShield()
 	ControllerClass = UBulletLogicShieldController::StaticClass();
 }
 
-UBulletLogicDataApplyGE::UBulletLogicDataApplyGE()
+UBulletLogicData_ApplyGameplayEffect::UBulletLogicData_ApplyGameplayEffect()
 {
 	Trigger = EBulletLogicTrigger::OnHit;
-	ControllerClass = UBulletLogicApplyGEController::StaticClass();
+	ControllerClass = UBulletLogicController_ApplyGameplayEffect::StaticClass();
 }
 

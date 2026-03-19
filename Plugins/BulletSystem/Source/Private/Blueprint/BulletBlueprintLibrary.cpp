@@ -6,7 +6,7 @@
 #include "Model/BulletModel.h"
 #include "Engine/World.h"
 
-int32 UBulletBlueprintLibrary::CreateBullet(const UObject* WorldContextObject, UBulletConfig* ConfigAsset, FName BulletID, const FBulletInitParams& InitParams)
+int32 UBulletBlueprintLibrary::SpawnBullet(const UObject* WorldContextObject, UBulletConfig* ConfigAsset, FName BulletID, const FBulletInitParams& InitParams)
 {
     if (!WorldContextObject)
     {
@@ -26,7 +26,7 @@ int32 UBulletBlueprintLibrary::CreateBullet(const UObject* WorldContextObject, U
     }
 
     int32 BulletId = INDEX_NONE;
-    Subsystem->GetController()->CreateBullet(InitParams, BulletID, BulletId, ConfigAsset);
+    Subsystem->GetController()->SpawnBullet(InitParams, BulletID, BulletId, ConfigAsset);
     return BulletId;
 }
 
@@ -120,7 +120,7 @@ bool UBulletBlueprintLibrary::ResetBulletHitActors(const UObject* WorldContextOb
     return Subsystem->GetController()->ResetHitActors(BulletId);
 }
 
-int32 UBulletBlueprintLibrary::ApplyDamageToOverlaps(const UObject* WorldContextObject, int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
+int32 UBulletBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObject, int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
 {
     if (!WorldContextObject)
     {
@@ -139,6 +139,55 @@ int32 UBulletBlueprintLibrary::ApplyDamageToOverlaps(const UObject* WorldContext
         return 0;
     }
 
-    return Subsystem->GetController()->ApplyDamageToOverlaps(BulletId, bResetHitActorsBefore, bApplyCollisionResponse);
+    return Subsystem->GetController()->ProcessManualHits(BulletId, bResetHitActorsBefore, bApplyCollisionResponse);
 }
 
+const FBulletPayload& UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByName(FBulletPayload& Payload, FName DataName, float Magnitude)
+{
+    if (DataName.IsNone())
+    {
+        return Payload;
+    }
+
+    Payload.SetByCallerNameMagnitudes.Add(DataName, Magnitude);
+    
+    return Payload;
+}
+
+const FBulletPayload& UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByTag(FBulletPayload& Payload, FGameplayTag DataTag, float Magnitude)
+{
+    if (!DataTag.IsValid())
+    {
+        return Payload;
+    }
+
+    Payload.SetByCallerTagMagnitudes.Add(DataTag, Magnitude);
+    
+    return Payload;
+}
+
+bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByName(const FBulletInfo& BulletInfo, FName DataName, float& OutMagnitude)
+{
+    const float* Found = DataName.IsNone() ? nullptr : BulletInfo.InitParams.Payload.SetByCallerNameMagnitudes.Find(DataName);
+    if (!Found)
+    {
+        OutMagnitude = 0.0f;
+        return false;
+    }
+
+    OutMagnitude = *Found;
+    return true;
+}
+
+bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByTag(const FBulletInfo& BulletInfo, FGameplayTag DataTag, float& OutMagnitude)
+{
+    const float* Found = DataTag.IsValid() ? BulletInfo.InitParams.Payload.SetByCallerTagMagnitudes.Find(DataTag) : nullptr;
+    if (!Found)
+    {
+        OutMagnitude = 0.0f;
+        return false;
+    }
+
+    OutMagnitude = *Found;
+    return true;
+}

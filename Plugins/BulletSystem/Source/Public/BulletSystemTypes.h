@@ -123,6 +123,20 @@ enum class EBulletHitTrigger : uint8
 };
 
 USTRUCT(BlueprintType)
+struct FBulletPayload
+{
+    GENERATED_BODY()
+
+    // Optional per-shot payload carried by the bullet instance.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<FName, float> SetByCallerNameMagnitudes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
+    
+};
+
+USTRUCT(BlueprintType)
 struct FBulletDataBase
 {
     GENERATED_BODY()
@@ -627,6 +641,10 @@ struct FBulletInitParams
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     int32 ContextId = INDEX_NONE;
+
+    // Per-instance payload (typically filled by GA/Gameplay code at spawn time).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
+    FBulletPayload Payload;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     EBulletSyncType SyncType = EBulletSyncType::None;

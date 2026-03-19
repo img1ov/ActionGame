@@ -139,7 +139,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         {
             // Overlap mode: collect current overlaps for the configured shape.
             // Auto-hit: may immediately apply hit logic.
-            // Manual-hit: only stores overlaps for later processing (ApplyDamageToOverlaps).
+            // Manual-hit: only stores overlaps for later processing (ProcessManualHits).
             TSet<TWeakObjectPtr<AActor>> NewOverlaps;
             const FVector Center = Info.MoveInfo.Location;
             const FQuat Rotation = Info.MoveInfo.Rotation.Quaternion();

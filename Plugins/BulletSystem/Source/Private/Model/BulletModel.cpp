@@ -2,7 +2,7 @@
 #include "Pool/BulletPools.h"
 #include "Entity/BulletEntity.h"
 
-FBulletInfo* UBulletModel::CreateBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config)
+FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config)
 {
     const int32 BulletId = NextBulletId++;
 
