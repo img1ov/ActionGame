@@ -128,10 +128,10 @@ struct FBulletPayload
     GENERATED_BODY()
 
     // Optional per-shot payload carried by the bullet instance.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault))
     TMap<FName, float> SetByCallerNameMagnitudes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault))
     TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
 };
 
