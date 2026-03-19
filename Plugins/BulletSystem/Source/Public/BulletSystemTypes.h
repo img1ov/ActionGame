@@ -133,7 +133,6 @@ struct FBulletPayload
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
-    
 };
 
 USTRUCT(BlueprintType)
