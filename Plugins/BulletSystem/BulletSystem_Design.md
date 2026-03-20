@@ -274,6 +274,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 - `bSpawnLocationOffsetInSpawnSpace`：偏移是否在 spawn transform 空间计算（否则按世界空间）
 - `SpawnRotationOffset`：生成旋转偏移
 - `bInheritOwner / bInheritTarget / bInheritPayload`：是否继承 Owner/Target/Payload（继承到 Child 的 `FBulletInitParams`）
+ - 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletID`，避免回退到 `UBulletConfigSubsystem` 的默认配置而导致“找不到子弹行”。
 
 #### 13.4.2 触发链路（OnCreate / OnHit / OnDestroy）
 

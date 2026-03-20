@@ -282,11 +282,27 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
         *BulletID.ToString(),
         InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"),
         OverrideConfig ? *OverrideConfig->GetName() : *GetNameSafe(ConfigSubsystem ? ConfigSubsystem->GetConfigAsset() : nullptr));
-    return SpawnBulletByData(InitParams, Data, OutInstanceId);
+
+    UBulletConfig* SourceConfigAsset = nullptr;
+    if (OverrideConfig)
+    {
+        SourceConfigAsset = const_cast<UBulletConfig*>(OverrideConfig);
+    }
+    else if (ConfigSubsystem)
+    {
+        SourceConfigAsset = ConfigSubsystem->GetConfigAsset();
+    }
+
+    return SpawnBulletByDataInternal(InitParams, Data, OutInstanceId, SourceConfigAsset);
 }
 
 // Allocate a bullet entry and enqueue its init action.
 bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId) const
+{
+    return SpawnBulletByDataInternal(InitParams, Data, OutInstanceId, /*SourceConfigAsset*/ nullptr);
+}
+
+bool UBulletController::SpawnBulletByDataInternal(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId, UBulletConfig* SourceConfigAsset) const
 {
     if (!Model)
     {
@@ -300,6 +316,7 @@ bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, c
         return false;
     }
 
+    Info->SourceConfigAsset = SourceConfigAsset;
     Info->SpawnWorldTime = GetWorldTimeSeconds();
     OutInstanceId = Info->InstanceId;
     // Kick off the init action chain.
@@ -317,7 +334,11 @@ bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, c
         ConfigSubsystem->RequestPreload(Data);
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletID=%s Simple=%s"), OutInstanceId, *Data.BulletID.ToString(), Info->bIsSimple ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletID=%s Simple=%s SourceConfig=%s"),
+        OutInstanceId,
+        *Data.BulletID.ToString(),
+        Info->bIsSimple ? TEXT("true") : TEXT("false"),
+        *GetNameSafe(SourceConfigAsset));
     return true;
 }
 
@@ -962,7 +983,10 @@ void UBulletController::SpawnChildBulletsFromLogic(
         FBulletInitParams ChildParams = BaseParams;
         ChildParams.SpawnTransform = FTransform(ChildRot, ChildLocation);
         int32 ChildId = INDEX_NONE;
-        SpawnBullet(ChildParams, ChildBulletID, ChildId);
+        // If the parent was spawned using an override config asset, children should resolve rows from the same asset
+        // to avoid falling back to the global config subsystem (which may not have a config assigned).
+        const UBulletConfig* ChildConfigOverride = ParentInfo.SourceConfigAsset ? ParentInfo.SourceConfigAsset.Get() : nullptr;
+        SpawnBullet(ChildParams, ChildBulletID, ChildId, ChildConfigOverride);
     }
 }
 

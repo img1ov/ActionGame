@@ -8,6 +8,7 @@
 #include "BulletSystemTypes.h"
 #include "BulletInfo.generated.h"
 
+class UBulletConfig;
 class UBulletEntity;
 class ABulletActor;
 class UNiagaraComponent;
@@ -180,6 +181,11 @@ struct FBulletInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     FBulletDataMain Config;
 
+    // Config asset used to resolve Config for this instance (optional).
+    // Needed so child bullets can resolve rows from the same override config asset instead of falling back to the global config subsystem.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
+    TObjectPtr<UBulletConfig> SourceConfigAsset = nullptr;
+
     // Lightweight runtime entity wrapper (logic/budget/actor binding).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     TObjectPtr<UBulletEntity> Entity = nullptr;
@@ -270,4 +276,3 @@ struct FBulletInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     TArray<FBulletActionInfo> NextActionInfoList;
 };
-

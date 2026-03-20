@@ -104,6 +104,7 @@ public:
     bool IsDebugDrawEnabled() const;
 
 private:
+    bool SpawnBulletByDataInternal(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId, UBulletConfig* SourceConfigAsset) const;
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
     // Perform a collision query for manual-hit processing and return the current hit candidates.
@@ -149,4 +150,3 @@ private:
 
     bool bEnableDebugDraw = false;
 };
-
