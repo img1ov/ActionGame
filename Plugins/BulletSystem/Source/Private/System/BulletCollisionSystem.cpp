@@ -10,7 +10,9 @@
 #include "Engine/World.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/OverlapResult.h"
-#include "DrawDebugHelpers.h"
+#if WITH_EDITOR
+#include "Components/LineBatchComponent.h"
+#endif
 #include "BulletLogChannel.h"
 
 void UBulletCollisionSystem::OnTick(float DeltaSeconds)
@@ -29,7 +31,24 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
 
     #if WITH_EDITOR
     const bool bDebugDraw = Controller->IsDebugDrawEnabled();
-    const float DebugDrawDuration = 0.0f;
+    // We draw collision debug via ULineBatchComponent with a stable BatchID per bullet, so we can ClearBatch each tick.
+    // This avoids "trails" for fast-moving projectiles.
+    ULineBatchComponent* DebugLineBatcher = nullptr;
+    if (bDebugDraw)
+    {
+        DebugLineBatcher = World->GetLineBatcher(UWorld::ELineBatcherType::World);
+        if (!DebugLineBatcher)
+        {
+            DebugLineBatcher = World->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+        }
+    }
+    // Any positive lifetime works since we ClearBatch per tick and on destroy.
+    const float DebugDrawLifeTime = 2.0f;
+    auto MakeBulletDebugBatchId = [](int32 InInstanceId) -> uint32
+    {
+        // Use a recognizable prefix to reduce collision with other debug systems.
+        return 0xB011E700u ^ static_cast<uint32>(InInstanceId);
+    };
     #endif
     const float WorldTime = World->GetTimeSeconds();
 
@@ -117,6 +136,15 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         const bool bOverlapMode = Info.Config.Base.CollisionMode == EBulletCollisionMode::Overlap;
         const float HitInterval = Info.Config.Base.HitInterval;
 
+        #if WITH_EDITOR
+        const uint32 DebugBatchId = DebugLineBatcher ? MakeBulletDebugBatchId(Info.InstanceId) : 0u;
+        if (DebugLineBatcher)
+        {
+            // Remove last frame's debug primitive for this bullet instance.
+            DebugLineBatcher->ClearBatch(DebugBatchId);
+        }
+        #endif
+
         // Optional "obstacle" trace: a separate static-only sweep that can destroy the bullet before regular hit logic.
         // This is typically used to keep projectiles from clipping through walls when their normal channel is permissive.
         if (Info.Config.Obstacle.bEnableObstacle)
@@ -160,9 +188,17 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     }
                 }
                 #if WITH_EDITOR
-                if (bDebugDraw)
+                if (DebugLineBatcher)
                 {
-                    DrawDebugSphere(World, Center, Radius, 12, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                    DebugLineBatcher->DrawSphere(
+                        Center,
+                        Radius,
+                        12,
+                        bAnyOverlap ? FLinearColor::Red : FLinearColor::Green,
+                        DebugDrawLifeTime,
+                        /*DepthPriority*/ 0,
+                        /*Thickness*/ 0.0f,
+                        DebugBatchId);
                 }
                 #endif
                 break;
@@ -180,9 +216,17 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     }
                 }
                 #if WITH_EDITOR
-                if (bDebugDraw)
+                if (DebugLineBatcher)
                 {
-                    DrawDebugBox(World, Center, Extent, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                    DebugLineBatcher->DrawBox(
+                        Center,
+                        Extent,
+                        Rotation,
+                        bAnyOverlap ? FLinearColor::Red : FLinearColor::Green,
+                        DebugDrawLifeTime,
+                        /*DepthPriority*/ 0,
+                        /*Thickness*/ 0.0f,
+                        DebugBatchId);
                 }
                 #endif
                 break;
@@ -201,9 +245,18 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     }
                 }
                 #if WITH_EDITOR
-                if (bDebugDraw)
+                if (DebugLineBatcher)
                 {
-                    DrawDebugCapsule(World, Center, HalfHeight, Radius, Rotation, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                    DebugLineBatcher->DrawCapsule(
+                        Center,
+                        HalfHeight,
+                        Radius,
+                        Rotation,
+                        bAnyOverlap ? FLinearColor::Red : FLinearColor::Green,
+                        DebugDrawLifeTime,
+                        /*DepthPriority*/ 0,
+                        /*Thickness*/ 0.0f,
+                        DebugBatchId);
                 }
                 #endif
                 break;
@@ -222,9 +275,16 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     }
                 }
                 #if WITH_EDITOR
-                if (bDebugDraw)
+                if (DebugLineBatcher)
                 {
-                    DrawDebugLine(World, Start, End, bAnyOverlap ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                    DebugLineBatcher->DrawLine(
+                        Start,
+                        End,
+                        bAnyOverlap ? FLinearColor::Red : FLinearColor::Green,
+                        /*DepthPriority*/ 0,
+                        /*Thickness*/ 0.0f,
+                        DebugDrawLifeTime,
+                        DebugBatchId);
                 }
                 #endif
                 break;
@@ -278,11 +338,6 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                         }
                     }
 
-                    Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
-                    Info.CollisionInfo.HitCount++;
-                    Info.CollisionInfo.LastHitTime = WorldTime;
-                    Info.CollisionInfo.bHitThisFrame = true;
-
                     const FVector HitLocation = HitActor->GetActorLocation();
                     const FVector HitNormal = (HitLocation - Center).GetSafeNormal();
                     FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
@@ -299,6 +354,12 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                             continue;
                         }
                     }
+
+                    // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
+                    Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
+                    Info.CollisionInfo.HitCount++;
+                    Info.CollisionInfo.LastHitTime = WorldTime;
+                    Info.CollisionInfo.bHitThisFrame = true;
 
                     const bool bDestroyed = Controller->HandleHitResult(Info, HitActor, Hit, true);
                     if (bDestroyed)
@@ -332,9 +393,17 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             const float Radius = Info.Config.Base.SphereRadius;
             bHit = World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeSphere(Radius), QueryParams);
             #if WITH_EDITOR
-            if (bDebugDraw)
+            if (DebugLineBatcher)
             {
-                DrawDebugSphere(World, End, Radius, 12, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                DebugLineBatcher->DrawSphere(
+                    End,
+                    Radius,
+                    12,
+                    bHit ? FLinearColor::Red : FLinearColor::Green,
+                    DebugDrawLifeTime,
+                    /*DepthPriority*/ 0,
+                    /*Thickness*/ 0.0f,
+                    DebugBatchId);
             }
             #endif
             break;
@@ -344,9 +413,16 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             const FVector Extent = Info.Config.Base.BoxExtent;
             bHit = World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeBox(Extent), QueryParams);
             #if WITH_EDITOR
-            if (bDebugDraw)
+            if (DebugLineBatcher)
             {
-                DrawDebugBox(World, End, Extent, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                DebugLineBatcher->DrawBox(
+                    End,
+                    Extent,
+                    bHit ? FLinearColor::Red : FLinearColor::Green,
+                    DebugDrawLifeTime,
+                    /*DepthPriority*/ 0,
+                    /*Thickness*/ 0.0f,
+                    DebugBatchId);
             }
             #endif
             break;
@@ -357,9 +433,18 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             const float HalfHeight = Info.Config.Base.CapsuleHalfHeight;
             bHit = World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeCapsule(Radius, HalfHeight), QueryParams);
             #if WITH_EDITOR
-            if (bDebugDraw)
+            if (DebugLineBatcher)
             {
-                DrawDebugCapsule(World, End, HalfHeight, Radius, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                DebugLineBatcher->DrawCapsule(
+                    End,
+                    HalfHeight,
+                    Radius,
+                    FQuat::Identity,
+                    bHit ? FLinearColor::Red : FLinearColor::Green,
+                    DebugDrawLifeTime,
+                    /*DepthPriority*/ 0,
+                    /*Thickness*/ 0.0f,
+                    DebugBatchId);
             }
             #endif
             break;
@@ -368,9 +453,16 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         default:
             bHit = World->LineTraceMultiByChannel(Hits, Start, End, Channel, QueryParams);
             #if WITH_EDITOR
-            if (bDebugDraw)
+            if (DebugLineBatcher)
             {
-                DrawDebugLine(World, Start, End, bHit ? FColor::Red : FColor::Green, false, DebugDrawDuration);
+                DebugLineBatcher->DrawLine(
+                    Start,
+                    End,
+                    bHit ? FLinearColor::Red : FLinearColor::Green,
+                    /*DepthPriority*/ 0,
+                    /*Thickness*/ 0.0f,
+                    DebugDrawLifeTime,
+                    DebugBatchId);
             }
             #endif
             break;
@@ -446,11 +538,6 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 }
             }
 
-            Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
-            Info.CollisionInfo.HitCount++;
-            Info.CollisionInfo.LastHitTime = WorldTime;
-            Info.CollisionInfo.bHitThisFrame = true;
-
             if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
             {
                 if (!Info.Entity->GetLogicComponent()->FilterHit(Info, Hit))
@@ -458,6 +545,12 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                     continue;
                 }
             }
+
+            // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
+            Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
+            Info.CollisionInfo.HitCount++;
+            Info.CollisionInfo.LastHitTime = WorldTime;
+            Info.CollisionInfo.bHitThisFrame = true;
 
             const bool bDestroyed = Controller->HandleHitResult(Info, HitActor, Hit, true);
             if (bDestroyed)

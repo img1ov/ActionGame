@@ -67,6 +67,10 @@ public:
     // - and a class cache (per owner class) as a fallback.
     bool GetBulletData(FName BulletID, FBulletDataMain& OutData, const UObject* ContextOwner = nullptr);
 
+    // Clears all resolved-row caches and (optionally) rebuilds the config asset runtime table.
+    // Useful for PIE re-entry and editor iteration where DataTables are modified without restarting the game instance.
+    void ClearCaches(bool bRebuildRuntimeTable = true);
+
     // Async-ish preloading loop (runs on game thread) to warm up soft references in queued bullet rows.
     void TickPreload(float DeltaSeconds);
     // Queue a bullet row for preload (idempotent per BulletID).
@@ -94,4 +98,3 @@ private:
     UPROPERTY()
     TSet<FName> PreloadPendingRows;
 };
-

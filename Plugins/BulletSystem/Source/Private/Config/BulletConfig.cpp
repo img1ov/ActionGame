@@ -37,6 +37,7 @@ void UBulletConfig::RebuildRuntimeTable() const
     RuntimeTable.Reset();
     bRuntimeTableDirty = false;
 
+    int32 AddedRowCount = 0;
     for (UDataTable* Table : BulletDataTables)
     {
         if (!Table)
@@ -46,7 +47,10 @@ void UBulletConfig::RebuildRuntimeTable() const
 
         if (Table->GetRowStruct() != FBulletDataMain::StaticStruct())
         {
-            UE_LOG(LogBullet, Warning, TEXT("BulletConfig: DataTable '%s' row struct mismatch (expected FBulletDataMain). Skipped."), *Table->GetName());
+            UE_LOG(LogBullet, Warning, TEXT("BulletConfig: DataTable '%s' row struct mismatch. Expected=%s Actual=%s. Skipped."),
+                *Table->GetName(),
+                *GetNameSafe(FBulletDataMain::StaticStruct()),
+                *GetNameSafe(Table->GetRowStruct()));
             continue;
         }
 
@@ -76,6 +80,7 @@ void UBulletConfig::RebuildRuntimeTable() const
             {
                 Added->BulletID = RowBulletId;
             }
+            ++AddedRowCount;
         }
     }
 
@@ -90,7 +95,11 @@ void UBulletConfig::RebuildRuntimeTable() const
         {
             Added->BulletID = Item.BulletID;
         }
+        ++AddedRowCount;
     }
+
+    UE_LOG(LogBullet, VeryVerbose, TEXT("BulletConfig: RebuildRuntimeTable done. Rows=%d Tables=%d Inline=%d Asset=%s"),
+        AddedRowCount, BulletDataTables.Num(), InlineBulletData.Num(), *GetNameSafe(this));
 }
 
 #if WITH_EDITOR
@@ -237,6 +246,20 @@ bool UBulletConfigSubsystem::GetBulletData(FName BulletID, FBulletDataMain& OutD
     }
     OutData = Loaded;
     return true;
+}
+
+void UBulletConfigSubsystem::ClearCaches(bool bRebuildRuntimeTable)
+{
+    CommonCache.Empty();
+    OwnerCache.Empty();
+    ClassCache.Empty();
+    PreloadQueue.Empty();
+    PreloadPendingRows.Empty();
+
+    if (bRebuildRuntimeTable && ConfigAsset)
+    {
+        ConfigAsset->RebuildRuntimeTable();
+    }
 }
 
 void UBulletConfigSubsystem::TickPreload(float DeltaSeconds)

@@ -38,6 +38,7 @@ LogicController / Render / Interact / Pool
 - `FBulletDataBase`：形状、生命周期、碰撞策略、命中间隔、碰撞模式等基础字段。
 - `FBulletDataMove`：运动类型、速度、跟踪、固定时长、环绕等。
 - `FBulletDataExecution`：LogicData 列表，驱动玩法逻辑扩展。
+- `FBulletDataRender`：仅负责表现资源（Niagara/Mesh/ActorClass）。跟随/附着由 `Move.MoveType=Attached` 统一负责，避免“表现跟随但碰撞不跟随”的无效选项。
 
 ### 3.2 关键能力
 
@@ -124,6 +125,11 @@ LogicController / Render / Interact / Pool
 
 避免直接销毁导致的资源泄露或顺序问题。
 
+补充说明：
+
+- 常规销毁会通过 `RequestDestroyBullet` 入队 `DestroyBullet` Action，在动作执行后标记 `NeedDestroy`，并在 `AfterTick` 阶段 `FlushDestroyedBullets()` 统一回收进对象池。
+- `EBulletDestroyReason::Immediate` 用于需要“同一调用立刻生效”的场景：会立即触发 OnDestroy 并关闭碰撞，但对象池回收仍然在帧末 Flush 统一完成（避免在高频系统迭代中直接移除导致不稳定）。
+
 ## 8. 高频系统层
 
 ### 8.1 MoveSystem
@@ -133,6 +139,8 @@ LogicController / Render / Interact / Pool
 - Straight / Parabola / Orbit / Follow / FixedDuration / Attached
 - Homing 追踪
 - 允许 `ReplaceMove` 逻辑替换默认运动
+
+其中 `Attached` 会跟随 Owner 的 Transform，并保留进入 Attached 状态时捕获的相对偏移。
 
 ### 8.2 CollisionSystem
 
@@ -168,6 +176,25 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 - `BudgetComponent`：高频系统降采样更新
 
 目标是控制 GC 抖动、减少创建销毁开销、稳定帧率。
+
+### 10.1 PIE/StopPlay 清理策略（重要）
+
+在 Editor 下，StopPlay 后再次 Play 可能会复用同一进程中的缓存对象。如果不显式清理，可能出现：
+
+- 修改了 DataTable/Config，但下次 Play 仍命中旧缓存
+- 对象池复用到“上一次 Play 的子弹实体/表现 Actor”，造成行为与配置不一致
+
+因此 BulletSystem 在 **World 维度** 做兜底清理，并提供 ProjectSettings 开关控制时机：
+
+- ProjectSettings: `BulletSystemSettings.RuntimeResetPolicy`
+  - `BeginPlayOnly` / `StopPlayOnly` / `BeginPlayAndStopPlay` / `None`
+  - 默认：`BeginPlayAndStopPlay`
+- 实现位置：`UBulletWorldSubsystem`
+  - BeginPlay: `OnWorldBeginPlay()` 按策略调用 `UBulletController::Shutdown()` 清空对象池与存活子弹
+  - StopPlay: 监听 `FGameDelegates::EndPlayMapDelegate`（以及 WorldCleanup 兜底）按策略重置
+  - 同时会调用 `UBulletConfigSubsystem::ClearCaches(true)`，避免 DataTable/Inline 配置在 PIE 循环中命中旧缓存
+- 迭代/调试时可手动触发：
+  - BP: `UBulletBlueprintLibrary::ClearBulletSystemRuntime(WorldContext, bRebuildRuntimeTable)`
 
 ## 11. 生命周期流程（简版）
 
@@ -256,7 +283,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 
 #### 13.4.3 继承与生命周期绑定（ParentInstanceId / ParentDestroyed）
 
-- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / SyncType / ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
+- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
 - 当 Parent 被销毁时，系统会在 FlushDestroyedBullets 阶段传播 `ParentDestroyed` 给“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
 
 ## 14. 碰撞与命中（最容易踩坑的部分）

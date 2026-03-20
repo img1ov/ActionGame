@@ -58,6 +58,58 @@ void UBulletActionRunner::EnqueueAction(int32 InstanceId, const FBulletActionInf
     }
 }
 
+void UBulletActionRunner::RunQueuedActionsForBullet(int32 InstanceId)
+{
+    if (!Controller || State == EBulletActionRunnerState::Pause)
+    {
+        return;
+    }
+
+    if (State == EBulletActionRunnerState::Running)
+    {
+        // Avoid re-entrancy. Bullets spawned during Run will be picked up next frame by the normal loop.
+        return;
+    }
+
+    UBulletModel* Model = Controller->GetModel();
+    if (!Model)
+    {
+        return;
+    }
+
+    FBulletInfo* InfoPtr = Model->GetBullet(InstanceId);
+    if (!InfoPtr)
+    {
+        return;
+    }
+
+    FBulletInfo& Info = *InfoPtr;
+    if (Info.bNeedDestroy)
+    {
+        return;
+    }
+
+    const EBulletActionRunnerState PrevState = State;
+    State = EBulletActionRunnerState::Running;
+
+    int32 SafetyCounter = 0;
+    while ((Info.ActionInfoList.Num() > 0 || Info.NextActionInfoList.Num() > 0) && SafetyCounter++ < 64)
+    {
+        if (Info.ActionInfoList.Num() == 0 && Info.NextActionInfoList.Num() > 0)
+        {
+            Info.ActionInfoList = MoveTemp(Info.NextActionInfoList);
+        }
+
+        if (Info.ActionInfoList.Num() > 0)
+        {
+            TArray<FBulletActionInfo> CurrentActions = MoveTemp(Info.ActionInfoList);
+            ProcessActionList(Info, CurrentActions);
+        }
+    }
+
+    State = PrevState;
+}
+
 void UBulletActionRunner::Run(float DeltaSeconds)
 {
     if (!Controller || State == EBulletActionRunnerState::Pause)
@@ -198,6 +250,14 @@ void UBulletActionRunner::ProcessActionList(FBulletInfo& BulletInfo, TArray<FBul
 
     for (const FBulletActionInfo& ActionInfo : ActionList)
     {
+        // Once a bullet is marked for destruction, do not execute any further queued actions for it.
+        // We still need to release the queued ActionInfo payloads back to the pool.
+        if (BulletInfo.bNeedDestroy)
+        {
+            ActionCenter->ReleaseActionInfo(ActionInfo);
+            continue;
+        }
+
         UBulletActionBase* Action = ActionCenter->AcquireAction(ActionInfo.Type);
         if (!Action)
         {

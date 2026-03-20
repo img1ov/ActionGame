@@ -80,23 +80,46 @@ enum class EBulletActionType : uint8
     UpdateAttackerFrozen
 };
 
+/**
+ * Why a bullet instance is being destroyed.
+ *
+ * This value is carried through `UBulletController::RequestDestroyBullet` -> `EBulletActionType::DestroyBullet` and
+ * finally forwarded to logic via `UBulletActionLogicComponent::HandleOnDestroy(..., Reason)`.
+ *
+ * Notes:
+ * - This is a high-level semantic reason for gameplay/logic/debug, not a low-level physics/collision response.
+ * - A bullet may receive multiple destroy requests; treat the reason as "the reason of the destroy request that
+ *   actually triggers OnDestroy for this instance" (implementation-dependent ordering).
+ */
 UENUM(BlueprintType)
 enum class EBulletDestroyReason : uint8
 {
-    LifeTimeExpired,
-    Hit,
-    AbilityEnd,
-    ParentDestroyed,
-    Logic,
-    External
-};
+    /** Destroyed because the configured lifetime (or OverrideLifeTime) has elapsed. */
+    LifeTimeExpired UMETA(DisplayName = "Lifetime Expired"),
 
-UENUM(BlueprintType)
-enum class EBulletSyncType : uint8
-{
-    None,
-    Server,
-    Multicast
+    /** Destroyed due to an accepted hit and the collision policy requested destruction (or max hit count reached). */
+    Hit UMETA(DisplayName = "Hit"),
+
+    /** Destroyed because the owning gameplay ability (or the ability-scoped context) has ended. */
+    AbilityEnd UMETA(DisplayName = "Ability End"),
+
+    /** Destroyed because its parent bullet instance was destroyed (parent-child linkage cleanup). */
+    ParentDestroyed UMETA(DisplayName = "Parent Destroyed"),
+
+    /** Destroyed explicitly by bullet logic (e.g. LogicData DestroyBullet controller). */
+    Logic UMETA(DisplayName = "Logic"),
+
+    /** Destroyed by external gameplay code, debug command, blueprint call, or other non-bullet-system trigger. */
+    External UMETA(DisplayName = "External"),
+
+    /**
+     * Immediate destroy request that should take effect in the same call.
+     *
+     * This bypasses the normal action queue for this instance and runs the destroy logic right away
+     * (fires OnDestroy and disables collision). The instance is still recycled/removed from the model
+     * during end-of-tick flush.
+     */
+    Immediate UMETA(DisplayName = "Immediate")
 };
 
 UENUM(BlueprintType)
@@ -218,10 +241,6 @@ struct FBulletDataLogic
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
     FGameplayTagContainer LogicTags;
 
-    /** If true, spawn/apply hit VFX/SFX as part of hit processing (if supported by render setup). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
-    bool bEnableHitEffect = true;
-
     /** Tags on the owner that indicate "frozen" state (config-driven, no hard-coded tags). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
     FGameplayTagContainer OwnerFrozenTags;
@@ -269,15 +288,15 @@ struct FBulletDataMove
     /** If true, use the provided spawn transform; otherwise spawn at owner location (plus offset). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     bool bUseSpawnTransform = true;
-
-    /** Rotation offset applied after aim/owner-forward resolution (degrees). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    FRotator SpawnRotationOffset = FRotator::ZeroRotator;
-
+    
     /** Spawn position offset (cm). Applied in owner space or world space depending on bSpawnOffsetInOwnerSpace. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     FVector SpawnLocationOffset = FVector::ZeroVector;
 
+    /** Rotation offset applied after aim/owner-forward resolution (degrees). */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    FRotator SpawnRotationOffset = FRotator::ZeroRotator;
+    
     /** If true, SpawnOffset is interpreted in owner local space; otherwise in world space. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     bool bSpawnOffsetInOwnerSpace = true;
@@ -301,10 +320,6 @@ struct FBulletDataMove
     /** Orbit angular speed (deg/s). Only used when MoveType == Orbit. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (ClampMin = "0", EditCondition = "MoveType == EBulletMoveType::Orbit"))
     float OrbitAngularSpeed = 0.0f;
-
-    /** If true, snap bullet transform to owner every tick (used for melee hitboxes and attachments). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    bool bAttachToOwner = false;
 };
 
 USTRUCT(BlueprintType)
@@ -327,10 +342,6 @@ struct FBulletDataRender
     /** Mesh scale applied on the render actor (if StaticMesh is used). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Render")
     FVector MeshScale = FVector(1.0f, 1.0f, 1.0f);
-
-    /** If true, attach the render actor to owner instead of moving independently. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Render")
-    bool bAttachToOwner = false;
 
     /** If true, auto-activate Niagara/mesh components when the render actor is acquired. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Render")
@@ -578,7 +589,6 @@ struct FBulletDataMain : public FTableRowBase
             Move.Speed = 0.0f;
             Move.bUseSpawnTransform = true;
             Move.bUseOwnerForward = false;
-            Move.bAttachToOwner = false;
             break;
         }
         case EBulletConfigProfile::Projectile:
@@ -600,7 +610,6 @@ struct FBulletDataMain : public FTableRowBase
             Move.Speed = 1200.0f;
             Move.bUseOwnerForward = true;
             Move.bUseSpawnTransform = true;
-            Move.bAttachToOwner = false;
             break;
         }
         case EBulletConfigProfile::Custom:
@@ -648,9 +657,6 @@ struct FBulletInitParams
     // Per-instance payload (typically filled by GA/Gameplay code at spawn time).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     FBulletPayload Payload;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    EBulletSyncType SyncType = EBulletSyncType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     FVector SizeOverride = FVector::ZeroVector;

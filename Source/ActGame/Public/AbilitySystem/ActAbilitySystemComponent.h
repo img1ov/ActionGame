@@ -120,7 +120,7 @@ public:
 
 	/** Spawn a bullet using PawnData->BulletConfig. */
 	UE_API int32 SpawnBullet(FName BulletID, const FBulletInitParams& InitParams) const;
-
+	
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="SpawnBullet")
 	UE_API int32 K2_SpawnBullet(FName BulletID, const FBulletInitParams& InitParams);
 	

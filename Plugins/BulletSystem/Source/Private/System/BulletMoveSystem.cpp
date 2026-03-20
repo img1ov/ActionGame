@@ -90,14 +90,33 @@ void UBulletMoveSystem::OnTick(float DeltaSeconds)
             continue;
         }
 
-        if (Info.MoveInfo.bAttachToOwner && Info.InitParams.Owner)
+        const bool bShouldAttachToOwner = (Info.MoveInfo.bAttachToOwner || MoveData.MoveType == EBulletMoveType::Attached);
+        if (bShouldAttachToOwner)
         {
-            // "Hard attach" for bullets that should follow the owner every tick (e.g. melee hitboxes).
-            Info.MoveInfo.Location = Info.InitParams.Owner->GetActorLocation();
-            Info.MoveInfo.Rotation = Info.InitParams.Owner->GetActorRotation();
+            if (Info.InitParams.Owner)
+            {
+                // Follow the owner transform while preserving the relative offset captured when we entered attached state.
+                const FTransform OwnerTransform = Info.InitParams.Owner->GetActorTransform();
+                if (!Info.MoveInfo.bAttachedLastTick)
+                {
+                    const FTransform BulletTransform(Info.MoveInfo.Rotation, Info.MoveInfo.Location);
+                    Info.MoveInfo.AttachedRelativeTransform = BulletTransform.GetRelativeTransform(OwnerTransform);
+                }
+
+                const FTransform NewBulletTransform = Info.MoveInfo.AttachedRelativeTransform * OwnerTransform;
+                Info.MoveInfo.Location = NewBulletTransform.GetLocation();
+                Info.MoveInfo.Rotation = NewBulletTransform.GetRotation().Rotator();
+                Info.MoveInfo.bAttachedLastTick = true;
+            }
+            else
+            {
+                // Config/runtime says "attached" but we don't have an owner. Keep the bullet stationary.
+                Info.MoveInfo.bAttachedLastTick = false;
+            }
         }
         else if (Info.MoveInfo.CustomMoveCurve && Info.MoveInfo.CustomMoveDuration > 0.0f)
         {
+            Info.MoveInfo.bAttachedLastTick = false;
             // Curve-driven movement: interpret the curve output as an offset from the cached start location.
             Info.MoveInfo.CustomMoveElapsed += ScaledDelta;
             const float Alpha = FMath::Clamp(Info.MoveInfo.CustomMoveElapsed / Info.MoveInfo.CustomMoveDuration, 0.0f, 1.0f);
@@ -112,6 +131,7 @@ void UBulletMoveSystem::OnTick(float DeltaSeconds)
         }
         else
         {
+            Info.MoveInfo.bAttachedLastTick = false;
             switch (MoveData.MoveType)
             {
             case EBulletMoveType::Orbit:
@@ -145,14 +165,6 @@ void UBulletMoveSystem::OnTick(float DeltaSeconds)
                 // Simple Euler integration with configurable gravity acceleration.
                 Info.MoveInfo.Velocity += FVector(0.0f, 0.0f, MoveData.Gravity) * ScaledDelta;
                 Info.MoveInfo.Location += Info.MoveInfo.Velocity * ScaledDelta;
-                break;
-            }
-            case EBulletMoveType::Attached:
-            {
-                if (Info.InitParams.Owner)
-                {
-                    Info.MoveInfo.Location = Info.InitParams.Owner->GetActorLocation();
-                }
                 break;
             }
             case EBulletMoveType::FixedDuration:

@@ -35,6 +35,7 @@ private:
 		FGameplayTag CommandTag;
 		FName AbilityID;
 		FName WindowId;
+		int32 Priority = 0;
 	};
 
 private:

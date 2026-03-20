@@ -29,6 +29,11 @@ void UBulletPool::ReleaseEntity(UBulletEntity* Entity)
     InactiveEntities.Add(Entity);
 }
 
+void UBulletPool::Clear()
+{
+    InactiveEntities.Reset();
+}
+
 void UBulletActorPool::Initialize(UWorld* InWorld, TSubclassOf<ABulletActor> InDefaultClass)
 {
     World = InWorld;
@@ -56,15 +61,18 @@ ABulletActor* UBulletActorPool::AcquireActor(TSubclassOf<ABulletActor> Requested
     // Pool actors per class to avoid reusing mismatched render setups (mesh/niagara/components can differ by class).
     if (FBulletActorPoolBucket* Bucket = InactiveActorsByClass.Find(SpawnClass))
     {
-        if (Bucket->Actors.Num() > 0)
+        while (Bucket->Actors.Num() > 0)
         {
-            if (ABulletActor* Actor = Bucket->Actors.Pop())
+            ABulletActor* Actor = Bucket->Actors.Pop(EAllowShrinking::No);
+            if (!IsValid(Actor) || Actor->IsActorBeingDestroyed() || Actor->GetWorld() != WorldPtr)
             {
-                Actor->SetActorHiddenInGame(false);
-                // Render actors are controlled by the bullet system; collision is handled by the collision system.
-                Actor->SetActorEnableCollision(false);
-                return Actor;
+                continue;
             }
+
+            Actor->SetActorHiddenInGame(false);
+            // Render actors are controlled by the bullet system; collision is handled by the collision system.
+            Actor->SetActorEnableCollision(false);
+            return Actor;
         }
     }
 
@@ -73,7 +81,7 @@ ABulletActor* UBulletActorPool::AcquireActor(TSubclassOf<ABulletActor> Requested
 
 void UBulletActorPool::ReleaseActor(ABulletActor* Actor)
 {
-    if (!Actor)
+    if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
     {
         return;
     }
@@ -112,4 +120,9 @@ FBulletTraceElement UBulletTraceElementPool::Acquire()
 void UBulletTraceElementPool::Release(const FBulletTraceElement& Element)
 {
     Pool.Add(Element);
+}
+
+void UBulletTraceElementPool::Clear()
+{
+    Pool.Reset();
 }

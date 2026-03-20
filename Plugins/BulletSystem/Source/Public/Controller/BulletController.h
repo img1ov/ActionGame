@@ -106,6 +106,8 @@ public:
 private:
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
+    // Perform a collision query for manual-hit processing and return the current hit candidates.
+    void CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const;
     // Build child init params (owner/target/payload inheritance).
     FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const;
     const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const;

@@ -30,7 +30,6 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
     {
         BulletInfo.Entity->GetBudgetComponent()->Initialize(BudgetInterval, BulletInfo.SpawnWorldTime);
     }
-    BulletInfo.MoveInfo.bAttachToOwner = BulletInfo.Config.Move.bAttachToOwner;
     BulletInfo.TimeScale = BulletInfo.Config.TimeScale.TimeDilation > 0.0f ? BulletInfo.Config.TimeScale.TimeDilation : 1.0f;
     BulletInfo.Tags.AppendTags(BulletInfo.Config.Logic.LogicTags);
 
@@ -42,7 +41,10 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
         }
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("InitBullet: InstanceId=%d Simple=%s"), BulletInfo.InstanceId, BulletInfo.bIsSimple ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("InitBullet: InstanceId=%d Simple=%s LogicDataCount=%d"),
+        BulletInfo.InstanceId,
+        BulletInfo.bIsSimple ? TEXT("true") : TEXT("false"),
+        BulletInfo.Config.Execution.LogicDataList.Num());
 
     InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitHit});
     InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitMove});
@@ -99,37 +101,59 @@ void UBulletActionInitHit::Execute(UBulletController* InController, FBulletInfo&
 // Compute initial transform/velocity based on config and init params.
 void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
 {
+    (void)InController;
+    (void)ActionInfo;
+
+    const FBulletDataMove& MoveData = BulletInfo.Config.Move;
+    const FBulletDataAimed& AimedData = BulletInfo.Config.Aimed;
+    const AActor* Owner = BulletInfo.InitParams.Owner;
+
+    // Step 1: Resolve spawn basis (SpawnTransform vs Owner fallback).
     FVector SpawnLocation = BulletInfo.InitParams.SpawnTransform.GetLocation();
     FRotator SpawnRotation = BulletInfo.InitParams.SpawnTransform.GetRotation().Rotator();
+    const bool bSpawnTransformIsIdentity = BulletInfo.InitParams.SpawnTransform.Equals(FTransform::Identity);
 
-    if (!BulletInfo.Config.Move.bUseSpawnTransform && BulletInfo.InitParams.Owner)
+#if WITH_EDITOR
+    if (MoveData.bUseSpawnTransform && Owner && bSpawnTransformIsIdentity)
     {
-        SpawnLocation = BulletInfo.InitParams.Owner->GetActorLocation();
-        SpawnRotation = BulletInfo.InitParams.Owner->GetActorRotation();
+        UE_LOG(LogBullet, Warning, TEXT("InitMove: InstanceId=%d BulletID=%s uses SpawnTransform but it is Identity. Did you forget to set InitParams.SpawnTransform? Owner=%s"),
+            BulletInfo.InstanceId,
+            *BulletInfo.Config.BulletID.ToString(),
+            *GetNameSafe(BulletInfo.InitParams.Owner));
+    }
+#endif
+
+    // SpawnTransform is an optional input for the spawn API. If designers choose to use it but gameplay code doesn't
+    // provide one (Identity), fallback to owner transform to avoid spawning at world origin.
+    if (Owner && (!MoveData.bUseSpawnTransform || bSpawnTransformIsIdentity))
+    {
+        SpawnLocation = Owner->GetActorLocation();
+        SpawnRotation = Owner->GetActorRotation();
     }
 
-    FVector ConfigOffset = BulletInfo.Config.Move.SpawnLocationOffset;
-    if (BulletInfo.Config.Move.bSpawnOffsetInOwnerSpace)
+    // Step 2: Apply spawn offsets (config + per-shot init params).
+    FVector ConfigOffset = MoveData.SpawnLocationOffset;
+    if (MoveData.bSpawnOffsetInOwnerSpace)
     {
         ConfigOffset = SpawnRotation.RotateVector(ConfigOffset);
     }
-
     SpawnLocation += ConfigOffset;
     SpawnLocation += BulletInfo.InitParams.SpawnOffset;
 
-    FVector BaseDirection = SpawnRotation.Vector();
+    // Step 3: Resolve initial direction (aim/owner forward/spawn forward) and final rotation.
+    const FVector BaseDirection = SpawnRotation.Vector();
     FVector Direction = BaseDirection;
-    if (BulletInfo.Config.Aimed.bUseAim)
+    if (AimedData.bUseAim)
     {
         const FVector TargetLocation = BulletInfo.InitParams.TargetActor ? BulletInfo.InitParams.TargetActor->GetActorLocation() : BulletInfo.InitParams.TargetLocation;
         if (!TargetLocation.IsNearlyZero())
         {
             FVector AimDirection = (TargetLocation - SpawnLocation).GetSafeNormal();
-            if (BulletInfo.Config.Aimed.AimAngleTolerance > 0.0f)
+            if (AimedData.AimAngleTolerance > 0.0f)
             {
                 const float Dot = FMath::Clamp(FVector::DotProduct(AimDirection, BaseDirection), -1.0f, 1.0f);
                 const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(Dot));
-                if (AngleDeg > BulletInfo.Config.Aimed.AimAngleTolerance)
+                if (AngleDeg > AimedData.AimAngleTolerance)
                 {
                     AimDirection = BaseDirection;
                 }
@@ -137,42 +161,60 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
             Direction = AimDirection;
         }
     }
-    else if (BulletInfo.Config.Move.bUseOwnerForward && BulletInfo.InitParams.Owner)
+    else if (MoveData.bUseOwnerForward && Owner)
     {
-        Direction = BulletInfo.InitParams.Owner->GetActorForwardVector();
+        Direction = Owner->GetActorForwardVector();
     }
 
+    FRotator FinalRotation = Direction.ToOrientationRotator() + MoveData.SpawnRotationOffset;
+    Direction = FinalRotation.Vector();
+
+    // Step 4: Initialize runtime MoveInfo fields (reset all derived state).
     BulletInfo.MoveInfo.Location = SpawnLocation;
     BulletInfo.MoveInfo.LastLocation = SpawnLocation;
-    FRotator FinalRotation = Direction.ToOrientationRotator() + BulletInfo.Config.Move.SpawnRotationOffset;
-    Direction = FinalRotation.Vector();
     BulletInfo.MoveInfo.Rotation = FinalRotation;
+
     BulletInfo.MoveInfo.OrbitCenter = SpawnLocation;
     BulletInfo.MoveInfo.bOrbitCenterInitialized = true;
+
     BulletInfo.MoveInfo.CustomMoveCurve = nullptr;
     BulletInfo.MoveInfo.CustomMoveDuration = 0.0f;
     BulletInfo.MoveInfo.CustomMoveElapsed = 0.0f;
     BulletInfo.MoveInfo.CustomMoveStartLocation = SpawnLocation;
+
     BulletInfo.MoveInfo.FixedStartLocation = SpawnLocation;
     BulletInfo.MoveInfo.FixedTargetLocation = FVector::ZeroVector;
     BulletInfo.MoveInfo.FixedDuration = 0.0f;
     BulletInfo.MoveInfo.FixedElapsed = 0.0f;
 
-    const FVector BaseVelocity = Direction * BulletInfo.Config.Move.Speed;
-    BulletInfo.MoveInfo.Velocity = BaseVelocity + BulletInfo.Config.Move.InitialVelocity;
-    BulletInfo.MoveInfo.Acceleration = FVector(0.0f, 0.0f, BulletInfo.Config.Move.Gravity);
+    // Step 5: Compute initial velocity/acceleration.
+    const FVector BaseVelocity = Direction * MoveData.Speed;
+    BulletInfo.MoveInfo.Velocity = BaseVelocity + MoveData.InitialVelocity;
+    BulletInfo.MoveInfo.Acceleration = FVector(0.0f, 0.0f, MoveData.Gravity);
     BulletInfo.MoveInfo.bInitialized = true;
 
-    if (BulletInfo.Config.Move.MoveType == EBulletMoveType::FixedDuration)
+    // Step 6: MoveType-specific derived state.
+    // If configured as Attached, capture the relative transform at spawn time.
+    BulletInfo.MoveInfo.bAttachedLastTick = false;
+    BulletInfo.MoveInfo.AttachedRelativeTransform = FTransform::Identity;
+    if (MoveData.MoveType == EBulletMoveType::Attached && Owner)
+    {
+        const FTransform OwnerTransform = Owner->GetActorTransform();
+        const FTransform BulletTransform(BulletInfo.MoveInfo.Rotation, BulletInfo.MoveInfo.Location);
+        BulletInfo.MoveInfo.AttachedRelativeTransform = BulletTransform.GetRelativeTransform(OwnerTransform);
+        BulletInfo.MoveInfo.bAttachedLastTick = true;
+    }
+
+    if (MoveData.MoveType == EBulletMoveType::FixedDuration)
     {
         FVector TargetLocation = BulletInfo.InitParams.TargetActor ? BulletInfo.InitParams.TargetActor->GetActorLocation() : BulletInfo.InitParams.TargetLocation;
         if (TargetLocation.IsNearlyZero())
         {
-            const float Duration = BulletInfo.Config.Move.FixedDuration > 0.0f ? BulletInfo.Config.Move.FixedDuration : BulletInfo.Config.Base.LifeTime;
-            TargetLocation = SpawnLocation + (Direction * BulletInfo.Config.Move.Speed * Duration);
+            const float Duration = MoveData.FixedDuration > 0.0f ? MoveData.FixedDuration : BulletInfo.Config.Base.LifeTime;
+            TargetLocation = SpawnLocation + (Direction * MoveData.Speed * Duration);
         }
 
-        const float Duration = BulletInfo.Config.Move.FixedDuration > 0.0f ? BulletInfo.Config.Move.FixedDuration : BulletInfo.Config.Base.LifeTime;
+        const float Duration = MoveData.FixedDuration > 0.0f ? MoveData.FixedDuration : BulletInfo.Config.Base.LifeTime;
         BulletInfo.MoveInfo.FixedStartLocation = SpawnLocation;
         BulletInfo.MoveInfo.FixedTargetLocation = TargetLocation;
         BulletInfo.MoveInfo.FixedDuration = Duration;
@@ -194,7 +236,7 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
     }
 
 #if WITH_EDITOR
-    UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove: Id=%d MoveType=%d Loc=%s Vel=%s"),
+    UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove: InstanceId=%d MoveType=%d Loc=%s Vel=%s"),
         BulletInfo.InstanceId,
         static_cast<int32>(BulletInfo.Config.Move.MoveType),
         *BulletInfo.MoveInfo.Location.ToString(),
@@ -202,7 +244,7 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
 
     if (BulletInfo.Config.Move.MoveType == EBulletMoveType::FixedDuration)
     {
-        UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove FixedDuration: Id=%d Duration=%.3f Target=%s"),
+        UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove FixedDuration: InstanceId=%d Duration=%.3f Target=%s"),
             BulletInfo.InstanceId,
             BulletInfo.MoveInfo.FixedDuration,
             *BulletInfo.MoveInfo.FixedTargetLocation.ToString());
@@ -220,7 +262,7 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
     BulletInfo.CollisionInfo.OverlapActors.Reset();
 
 #if WITH_EDITOR
-    UE_LOG(LogBullet, VeryVerbose, TEXT("InitCollision: Id=%d Enabled=%s Mode=%d Shape=%d HitInterval=%.3f StartDelay=%.3f"),
+    UE_LOG(LogBullet, VeryVerbose, TEXT("InitCollision: InstanceId=%d Enabled=%s Mode=%d Shape=%d HitInterval=%.3f StartDelay=%.3f"),
         BulletInfo.InstanceId,
         BulletInfo.CollisionInfo.bCollisionEnabled ? TEXT("true") : TEXT("false"),
         static_cast<int32>(BulletInfo.Config.Base.CollisionMode),
@@ -270,15 +312,10 @@ void UBulletActionInitRender::Execute(UBulletController* InController, FBulletIn
             FinalScale *= BulletInfo.InitParams.Owner->GetActorScale3D();
         }
         Actor->SetActorScale3D(FinalScale);
-
-        if (BulletInfo.Config.Render.bAttachToOwner && BulletInfo.InitParams.Owner)
-        {
-            Actor->AttachToActor(BulletInfo.InitParams.Owner, FAttachmentTransformRules::KeepWorldTransform);
-        }
     }
 
 #if WITH_EDITOR
-    UE_LOG(LogBullet, VeryVerbose, TEXT("InitRender: Id=%d Actor=%s"),
+    UE_LOG(LogBullet, VeryVerbose, TEXT("InitRender: InstanceId=%d Actor=%s"),
         BulletInfo.InstanceId,
         Actor ? *Actor->GetName() : TEXT("None"));
 #endif

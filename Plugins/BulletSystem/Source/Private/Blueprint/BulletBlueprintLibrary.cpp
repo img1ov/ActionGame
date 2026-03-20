@@ -1,9 +1,11 @@
 // BulletSystem: BulletBlueprintLibrary.cpp
 // Blueprint-facing helpers.
 #include "Blueprint/BulletBlueprintLibrary.h"
+#include "Config/BulletConfig.h"
 #include "Controller/BulletWorldSubsystem.h"
 #include "Controller/BulletController.h"
 #include "Model/BulletModel.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 
 int32 UBulletBlueprintLibrary::SpawnBullet(const UObject* WorldContextObject, UBulletConfig* ConfigAsset, FName BulletID, const FBulletInitParams& InitParams)
@@ -73,7 +75,13 @@ bool UBulletBlueprintLibrary::IsBulletValid(const UObject* WorldContextObject, i
     }
 
     UBulletModel* Model = Subsystem->GetController()->GetModel();
-    return Model && Model->GetBullet(InstanceId) != nullptr;
+    if (!Model)
+    {
+        return false;
+    }
+
+    const FBulletInfo* Info = Model->GetBullet(InstanceId);
+    return Info != nullptr && !Info->bNeedDestroy;
 }
 
 bool UBulletBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors)
@@ -140,6 +148,36 @@ int32 UBulletBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObje
     }
 
     return Subsystem->GetController()->ProcessManualHits(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
+}
+
+void UBulletBlueprintLibrary::ClearBulletSystemRuntime(const UObject* WorldContextObject, bool bRebuildRuntimeTable)
+{
+    if (!WorldContextObject)
+    {
+        return;
+    }
+
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    if (UBulletWorldSubsystem* Subsystem = World->GetSubsystem<UBulletWorldSubsystem>())
+    {
+        if (UBulletController* Controller = Subsystem->GetController())
+        {
+            Controller->Shutdown();
+        }
+    }
+
+    if (UGameInstance* GameInstance = World->GetGameInstance())
+    {
+        if (UBulletConfigSubsystem* ConfigSubsystem = GameInstance->GetSubsystem<UBulletConfigSubsystem>())
+        {
+            ConfigSubsystem->ClearCaches(bRebuildRuntimeTable);
+        }
+    }
 }
 
 const FBulletPayload& UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByName(FBulletPayload& Payload, FName DataName, float Magnitude)

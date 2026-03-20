@@ -32,6 +32,8 @@ public:
     UBulletEntity* AcquireEntity(UObject* Outer);
     // Return an entity to the pool and reset its components.
     void ReleaseEntity(UBulletEntity* Entity);
+    // Clear pooled entities (typically on world teardown / PIE end).
+    void Clear();
 
 private:
     // Entities are reused to avoid per-bullet allocation churn during burst spawns.
@@ -87,6 +89,8 @@ public:
     FBulletTraceElement Acquire();
     // Return a trace element to the pool (value type).
     void Release(const FBulletTraceElement& Element);
+    // Clear pooled elements (typically on world teardown / PIE end).
+    void Clear();
 
 private:
     // Value-type pool; avoids heap allocations for per-bullet temporary structs.

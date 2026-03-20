@@ -35,6 +35,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
     static int32 ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
 
+    // Hard reset for iteration/debugging:
+    // - clears the current world's bullet pools + live bullets
+    // - clears config caches (and optionally rebuilds the runtime table)
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
+    static void ClearBulletSystemRuntime(const UObject* WorldContextObject, bool bRebuildRuntimeTable);
+
     // Payload (SetByCaller) helpers.
     // Write-side: only intended to be used before SpawnBullet (InitParams will be copied into runtime BulletInfo).
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")

@@ -61,7 +61,7 @@ public:
 
 	UActGameplayAbility(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-	UFUNCTION(BlueprintCallable, Category = "Lyra|Ability")
+	UFUNCTION(BlueprintCallable, Category = "Act|Ability")
 	UActAbilitySystemComponent* GetActAbilitySystemComponentFromActorInfo() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Act|Ability")

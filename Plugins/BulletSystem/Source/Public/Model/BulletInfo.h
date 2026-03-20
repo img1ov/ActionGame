@@ -46,6 +46,14 @@ struct FBulletMoveInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     bool bAttachToOwner = false;
 
+    // Cached relative transform used when following/attaching to the owner (computed when we enter attached state).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    FTransform AttachedRelativeTransform = FTransform::Identity;
+
+    // Tracks whether we were considered attached in the previous tick (used to detect attachment transitions).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
+    bool bAttachedLastTick = false;
+
     // Orbit state (degrees).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     float OrbitAngle = 0.0f;

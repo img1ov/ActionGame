@@ -14,12 +14,17 @@
 #include "Entity/BulletEntity.h"
 #include "Component/BulletActionLogicComponent.h"
 #include "Interact/BulletInteractInterface.h"
+#include "NiagaraComponent.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Actor.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
+#include "Engine/OverlapResult.h"
+#if WITH_EDITOR
+#include "Components/LineBatchComponent.h"
+#endif
 
 // Initialize runtime subsystems and pools for this world.
 void UBulletController::Initialize(UWorld* InWorld)
@@ -86,13 +91,70 @@ void UBulletController::Initialize(UWorld* InWorld)
 
 void UBulletController::Shutdown() const
 {
-    if (ActionRunner)
+    if (!Model)
     {
-        // Release persistent actions first.
-        for (const auto& Pair : Model->GetBulletMap())
+        return;
+    }
+
+#if WITH_EDITOR
+    auto MakeBulletDebugBatchId = [](int32 InInstanceId) -> uint32
+    {
+        return 0xB011E700u ^ static_cast<uint32>(InInstanceId);
+    };
+#endif
+
+    // Release all live bullets first (actors/entities/actions), then clear pools.
+    TArray<int32> InstanceIds;
+    InstanceIds.Reserve(Model->GetBulletMap().Num());
+    for (const auto& Pair : Model->GetBulletMap())
+    {
+        InstanceIds.Add(Pair.Key);
+    }
+
+    for (int32 InstanceId : InstanceIds)
+    {
+        if (ActionRunner)
         {
-            ActionRunner->ClearBulletActions(Pair.Key);
+            ActionRunner->ClearBulletActions(InstanceId);
         }
+
+        FBulletInfo* Info = Model->GetBullet(InstanceId);
+        if (!Info)
+        {
+            continue;
+        }
+
+        if (Info->Actor)
+        {
+            ReleaseBulletActor(Info->Actor);
+            Info->Actor = nullptr;
+        }
+
+#if WITH_EDITOR
+        if (bEnableDebugDraw)
+        {
+            if (UWorld* WorldPtr = GetWorld())
+            {
+                ULineBatchComponent* LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
+                if (!LineBatcher)
+                {
+                    LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+                }
+                if (LineBatcher)
+                {
+                    LineBatcher->ClearBatch(MakeBulletDebugBatchId(InstanceId));
+                }
+            }
+        }
+#endif
+
+        if (Info->Entity && BulletPool)
+        {
+            BulletPool->ReleaseEntity(Info->Entity);
+            Info->Entity = nullptr;
+        }
+
+        Model->RemoveBullet(InstanceId);
     }
 
     if (BulletActorPool)
@@ -100,10 +162,17 @@ void UBulletController::Shutdown() const
         BulletActorPool->Clear();
     }
 
-    if (Model)
+    if (BulletPool)
     {
-        Model->Clear();
+        BulletPool->Clear();
     }
+
+    if (TraceElementPool)
+    {
+        TraceElementPool->Clear();
+    }
+
+    Model->Clear();
 }
 
 // Main tick: run simulation systems, then process queued actions.
@@ -185,6 +254,17 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
 
     if (OverrideConfig)
     {
+#if WITH_EDITOR
+        // When iterating in PIE, designers often tweak DataTables/config assets between Play sessions.
+        // UBulletConfig caches a runtime lookup table, so force a rebuild for override configs to avoid stale rows.
+        if (UWorld* WorldPtr = GetWorld())
+        {
+            if (WorldPtr->WorldType == EWorldType::PIE)
+            {
+                OverrideConfig->RebuildRuntimeTable();
+            }
+        }
+#endif
         bFound = OverrideConfig->GetBulletData(BulletID, Data);
     }
     else if (ConfigSubsystem)
@@ -198,7 +278,10 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
         return false;
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s"), *BulletID.ToString(), InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"));
+    UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s Config=%s"),
+        *BulletID.ToString(),
+        InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"),
+        OverrideConfig ? *OverrideConfig->GetName() : *GetNameSafe(ConfigSubsystem ? ConfigSubsystem->GetConfigAsset() : nullptr));
     return SpawnBulletByData(InitParams, Data, OutInstanceId);
 }
 
@@ -221,6 +304,13 @@ bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, c
     OutInstanceId = Info->InstanceId;
     // Kick off the init action chain.
     EnqueueAction(OutInstanceId, {EBulletActionType::InitBullet});
+
+    // Make the instance usable immediately for gameplay code that calls into the bullet API right after spawning.
+    // (e.g. manual-hit processing in the same frame). If actions are already running, we keep it deferred.
+    if (ActionRunner && !ActionRunner->IsRunning())
+    {
+        ActionRunner->RunQueuedActionsForBullet(OutInstanceId);
+    }
 
     if (ConfigSubsystem)
     {
@@ -251,6 +341,75 @@ void UBulletController::EnqueueAction(int32 InstanceId, const FBulletActionInfo&
 
 void UBulletController::RequestDestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const
 {
+    if (Reason == EBulletDestroyReason::Immediate)
+    {
+        if (!Model)
+        {
+            return;
+        }
+
+        FBulletInfo* BulletInfo = Model->GetBullet(InstanceId);
+        if (!BulletInfo || BulletInfo->bNeedDestroy)
+        {
+            return;
+        }
+
+#if WITH_EDITOR
+        if (bEnableDebugDraw)
+        {
+            if (UWorld* WorldPtr = GetWorld())
+            {
+                ULineBatchComponent* LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
+                if (!LineBatcher)
+                {
+                    LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+                }
+                if (LineBatcher)
+                {
+                    const uint32 BatchId = 0xB011E700u ^ static_cast<uint32>(InstanceId);
+                    LineBatcher->ClearBatch(BatchId);
+                }
+            }
+        }
+#endif
+
+        BulletInfo->DestroyWorldTime = GetWorldTimeSeconds();
+        BulletInfo->bNeedDestroy = true;
+        BulletInfo->CollisionInfo.bCollisionEnabled = false;
+        BulletInfo->CollisionInfo.OverlapActors.Reset();
+        BulletInfo->CollisionInfo.HitActors.Reset();
+        BulletInfo->PendingDestroyDelay = 0.0f;
+
+        if (BulletInfo->Entity && BulletInfo->Entity->GetLogicComponent())
+        {
+            if (!BulletInfo->bIsSimple)
+            {
+                BulletInfo->Entity->GetLogicComponent()->HandleOnDestroy(*BulletInfo, Reason);
+            }
+        }
+
+        if (bSpawnChildren)
+        {
+            RequestSummonChildren(*BulletInfo, EBulletChildSpawnTrigger::OnDestroy);
+        }
+
+        if (BulletInfo->EffectInfo.NiagaraComponent)
+        {
+            if (UNiagaraComponent* NiagaraComponent = BulletInfo->EffectInfo.NiagaraComponent.Get())
+            {
+                NiagaraComponent->Deactivate();
+            }
+            BulletInfo->EffectInfo.NiagaraComponent = nullptr;
+        }
+
+        MarkBulletForDestroy(InstanceId);
+
+        UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBulletImmediate: InstanceId=%d SpawnChildren=%s"),
+            InstanceId,
+            bSpawnChildren ? TEXT("true") : TEXT("false"));
+        return;
+    }
+
     FBulletActionInfo Info;
     Info.Type = EBulletActionType::DestroyBullet;
     Info.DestroyReason = Reason;
@@ -277,6 +436,286 @@ void UBulletController::MarkBulletForDestroy(int32 InstanceId) const
     {
         Model->MarkNeedDestroy(InstanceId);
     }
+}
+
+void UBulletController::CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const
+{
+    OutHits.Reset();
+    Info.CollisionInfo.OverlapActors.Reset();
+
+    UWorld* WorldPtr = GetWorld();
+    if (!WorldPtr)
+    {
+        return;
+    }
+
+    if (Info.bNeedDestroy)
+    {
+        return;
+    }
+
+    if (!Info.CollisionInfo.bCollisionEnabled)
+    {
+        return;
+    }
+
+    const float WorldTime = GetWorldTimeSeconds();
+    if (Info.Config.Base.CollisionStartDelay > 0.0f && (WorldTime - Info.SpawnWorldTime) < Info.Config.Base.CollisionStartDelay)
+    {
+        return;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(BulletManualHit), false);
+    if (Info.Actor)
+    {
+        QueryParams.AddIgnoredActor(Info.Actor);
+    }
+    if (Info.InitParams.Owner)
+    {
+        QueryParams.AddIgnoredActor(Info.InitParams.Owner);
+    }
+
+    const ECollisionChannel Channel = Info.Config.Base.CollisionChannel;
+    const bool bOverlapMode = Info.Config.Base.CollisionMode == EBulletCollisionMode::Overlap;
+
+    // Unique hits per actor (avoid multi-component duplicates in overlap/sweep).
+    TMap<TWeakObjectPtr<AActor>, FHitResult> HitsByActor;
+    auto AddHitForActor = [&HitsByActor](AActor* HitActor, const FHitResult& Hit)
+    {
+        if (!HitActor)
+        {
+            return;
+        }
+
+        // Keep the first hit we see for an actor to keep behavior stable and cheap.
+        if (!HitsByActor.Contains(HitActor))
+        {
+            HitsByActor.Add(HitActor, Hit);
+        }
+    };
+
+    const FVector Center = Info.MoveInfo.Location;
+    const FQuat Rotation = Info.MoveInfo.Rotation.Quaternion();
+
+    if (bOverlapMode)
+    {
+        TSet<TWeakObjectPtr<AActor>> NewOverlaps;
+
+        switch (Info.Config.Base.Shape)
+        {
+        case EBulletShapeType::Sphere:
+        {
+            const float Radius = Info.Config.Base.SphereRadius;
+            TArray<FOverlapResult> Overlaps;
+            WorldPtr->OverlapMultiByChannel(Overlaps, Center, FQuat::Identity, Channel, FCollisionShape::MakeSphere(Radius), QueryParams);
+            for (const FOverlapResult& Overlap : Overlaps)
+            {
+                if (AActor* HitActor = Overlap.GetActor())
+                {
+                    NewOverlaps.Add(HitActor);
+                }
+            }
+            break;
+        }
+        case EBulletShapeType::Box:
+        {
+            const FVector Extent = Info.Config.Base.BoxExtent;
+            TArray<FOverlapResult> Overlaps;
+            WorldPtr->OverlapMultiByChannel(Overlaps, Center, Rotation, Channel, FCollisionShape::MakeBox(Extent), QueryParams);
+            for (const FOverlapResult& Overlap : Overlaps)
+            {
+                if (AActor* HitActor = Overlap.GetActor())
+                {
+                    NewOverlaps.Add(HitActor);
+                }
+            }
+            break;
+        }
+        case EBulletShapeType::Capsule:
+        {
+            const float Radius = Info.Config.Base.CapsuleRadius;
+            const float HalfHeight = Info.Config.Base.CapsuleHalfHeight;
+            TArray<FOverlapResult> Overlaps;
+            WorldPtr->OverlapMultiByChannel(Overlaps, Center, Rotation, Channel, FCollisionShape::MakeCapsule(Radius, HalfHeight), QueryParams);
+            for (const FOverlapResult& Overlap : Overlaps)
+            {
+                if (AActor* HitActor = Overlap.GetActor())
+                {
+                    NewOverlaps.Add(HitActor);
+                }
+            }
+            break;
+        }
+        case EBulletShapeType::Ray:
+        default:
+        {
+            const FVector Start = Info.MoveInfo.LastLocation;
+            const FVector End = Info.MoveInfo.Location;
+            TArray<FHitResult> Hits;
+            WorldPtr->LineTraceMultiByChannel(Hits, Start, End, Channel, QueryParams);
+            for (const FHitResult& Hit : Hits)
+            {
+                if (AActor* HitActor = Hit.GetActor())
+                {
+                    NewOverlaps.Add(HitActor);
+                    AddHitForActor(HitActor, Hit);
+                }
+            }
+            break;
+        }
+        }
+
+        Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
+
+        // Overlap queries don't provide hit results. Create stable pseudo hit results (same approach as collision system).
+        for (const TWeakObjectPtr<AActor>& ActorPtr : Info.CollisionInfo.OverlapActors)
+        {
+            AActor* HitActor = ActorPtr.Get();
+            if (!HitActor)
+            {
+                continue;
+            }
+
+            const FVector HitLocation = HitActor->GetActorLocation();
+            const FVector HitNormal = (HitLocation - Center).GetSafeNormal();
+            FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
+            Hit.Location = HitLocation;
+            Hit.ImpactPoint = HitLocation;
+            Hit.TraceStart = Center;
+            Hit.TraceEnd = Center;
+            Hit.ImpactNormal = HitNormal;
+            AddHitForActor(HitActor, Hit);
+        }
+    }
+    else
+    {
+        const FVector Start = Info.MoveInfo.LastLocation;
+        const FVector End = Info.MoveInfo.Location;
+
+        // If we didn't move this tick, fall back to a stationary overlap test for volume shapes so manual hit works
+        // even for "standing" hitboxes configured with Sweep.
+        const bool bNoMovement = Start.Equals(End, KINDA_SMALL_NUMBER);
+        if (bNoMovement && Info.Config.Base.Shape != EBulletShapeType::Ray)
+        {
+            TSet<TWeakObjectPtr<AActor>> NewOverlaps;
+            switch (Info.Config.Base.Shape)
+            {
+            case EBulletShapeType::Sphere:
+            {
+                const float Radius = Info.Config.Base.SphereRadius;
+                TArray<FOverlapResult> Overlaps;
+                WorldPtr->OverlapMultiByChannel(Overlaps, End, FQuat::Identity, Channel, FCollisionShape::MakeSphere(Radius), QueryParams);
+                for (const FOverlapResult& Overlap : Overlaps)
+                {
+                    if (AActor* HitActor = Overlap.GetActor())
+                    {
+                        NewOverlaps.Add(HitActor);
+                    }
+                }
+                break;
+            }
+            case EBulletShapeType::Box:
+            {
+                const FVector Extent = Info.Config.Base.BoxExtent;
+                TArray<FOverlapResult> Overlaps;
+                WorldPtr->OverlapMultiByChannel(Overlaps, End, Rotation, Channel, FCollisionShape::MakeBox(Extent), QueryParams);
+                for (const FOverlapResult& Overlap : Overlaps)
+                {
+                    if (AActor* HitActor = Overlap.GetActor())
+                    {
+                        NewOverlaps.Add(HitActor);
+                    }
+                }
+                break;
+            }
+            case EBulletShapeType::Capsule:
+            {
+                const float Radius = Info.Config.Base.CapsuleRadius;
+                const float HalfHeight = Info.Config.Base.CapsuleHalfHeight;
+                TArray<FOverlapResult> Overlaps;
+                WorldPtr->OverlapMultiByChannel(Overlaps, End, Rotation, Channel, FCollisionShape::MakeCapsule(Radius, HalfHeight), QueryParams);
+                for (const FOverlapResult& Overlap : Overlaps)
+                {
+                    if (AActor* HitActor = Overlap.GetActor())
+                    {
+                        NewOverlaps.Add(HitActor);
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+            }
+
+            Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
+            for (const TWeakObjectPtr<AActor>& ActorPtr : Info.CollisionInfo.OverlapActors)
+            {
+                AActor* HitActor = ActorPtr.Get();
+                if (!HitActor)
+                {
+                    continue;
+                }
+
+                const FVector HitLocation = HitActor->GetActorLocation();
+                const FVector HitNormal = (HitLocation - End).GetSafeNormal();
+                FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
+                Hit.Location = HitLocation;
+                Hit.ImpactPoint = HitLocation;
+                Hit.TraceStart = End;
+                Hit.TraceEnd = End;
+                Hit.ImpactNormal = HitNormal;
+                AddHitForActor(HitActor, Hit);
+            }
+        }
+        else if (!bNoMovement)
+        {
+            TArray<FHitResult> Hits;
+            bool bHit = false;
+
+            switch (Info.Config.Base.Shape)
+            {
+            case EBulletShapeType::Sphere:
+            {
+                const float Radius = Info.Config.Base.SphereRadius;
+                bHit = WorldPtr->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeSphere(Radius), QueryParams);
+                break;
+            }
+            case EBulletShapeType::Box:
+            {
+                const FVector Extent = Info.Config.Base.BoxExtent;
+                bHit = WorldPtr->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeBox(Extent), QueryParams);
+                break;
+            }
+            case EBulletShapeType::Capsule:
+            {
+                const float Radius = Info.Config.Base.CapsuleRadius;
+                const float HalfHeight = Info.Config.Base.CapsuleHalfHeight;
+                bHit = WorldPtr->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, Channel, FCollisionShape::MakeCapsule(Radius, HalfHeight), QueryParams);
+                break;
+            }
+            case EBulletShapeType::Ray:
+            default:
+                bHit = WorldPtr->LineTraceMultiByChannel(Hits, Start, End, Channel, QueryParams);
+                break;
+            }
+
+            if (bHit)
+            {
+                TSet<TWeakObjectPtr<AActor>> NewOverlaps;
+                for (const FHitResult& Hit : Hits)
+                {
+                    if (AActor* HitActor = Hit.GetActor())
+                    {
+                        NewOverlaps.Add(HitActor);
+                        AddHitForActor(HitActor, Hit);
+                    }
+                }
+                Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
+            }
+        }
+    }
+
+    HitsByActor.GenerateValueArray(OutHits);
 }
 
 void UBulletController::GetChildInstanceIds(int32 ParentInstanceId, TArray<int32>& OutChildren) const
@@ -372,18 +811,16 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
         Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
     }
 
-    if (Info->CollisionInfo.OverlapActors.Num() == 0)
-    {
-        return 0;
-    }
+    TArray<FHitResult> Hits;
+    CollectManualHitCandidates(*Info, Hits);
 
     const float WorldTime = GetWorldTimeSeconds();
     const float HitInterval = Info->Config.Base.HitInterval;
     int32 AppliedCount = 0;
 
-    for (const TWeakObjectPtr<AActor>& ActorPtr : Info->CollisionInfo.OverlapActors)
+    for (const FHitResult& Hit : Hits)
     {
-        AActor* HitActor = ActorPtr.Get();
+        AActor* HitActor = Hit.GetActor();
         if (!HitActor)
         {
             continue;
@@ -398,19 +835,6 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
             }
         }
 
-        Info->CollisionInfo.HitActors.Add(HitActor, WorldTime);
-        Info->CollisionInfo.HitCount++;
-        Info->CollisionInfo.LastHitTime = WorldTime;
-        Info->CollisionInfo.bHitThisFrame = true;
-
-        const FVector HitLocation = HitActor->GetActorLocation();
-        const FVector HitNormal = (HitLocation - Info->MoveInfo.Location).GetSafeNormal();
-        FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
-        Hit.Location = HitLocation;
-        Hit.ImpactPoint = HitLocation;
-        Hit.TraceStart = Info->MoveInfo.Location;
-        Hit.TraceEnd = Info->MoveInfo.Location;
-
         if (!Info->bIsSimple && Info->Entity && Info->Entity->GetLogicComponent())
         {
             if (!Info->Entity->GetLogicComponent()->FilterHit(*Info, Hit))
@@ -418,6 +842,12 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
                 continue;
             }
         }
+
+        // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
+        Info->CollisionInfo.HitActors.Add(HitActor, WorldTime);
+        Info->CollisionInfo.HitCount++;
+        Info->CollisionInfo.LastHitTime = WorldTime;
+        Info->CollisionInfo.bHitThisFrame = true;
 
         const bool bDestroyed = HandleHitResult(*Info, HitActor, Hit, bApplyCollisionResponse);
         AppliedCount++;
@@ -732,6 +1162,13 @@ void UBulletController::FlushDestroyedBullets() const
         return;
     }
 
+#if WITH_EDITOR
+    auto MakeBulletDebugBatchId = [](int32 InInstanceId) -> uint32
+    {
+        return 0xB011E700u ^ static_cast<uint32>(InInstanceId);
+    };
+#endif
+
     TArray<int32> ToDestroy = Model->GetNeedDestroyBullets().Array();
     for (int32 InstanceId : ToDestroy)
     {
@@ -768,6 +1205,24 @@ void UBulletController::FlushDestroyedBullets() const
             ActionRunner->ClearBulletActions(InstanceId);
         }
 
+#if WITH_EDITOR
+        if (bEnableDebugDraw)
+        {
+            if (UWorld* WorldPtr = GetWorld())
+            {
+                ULineBatchComponent* LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
+                if (!LineBatcher)
+                {
+                    LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+                }
+                if (LineBatcher)
+                {
+                    LineBatcher->ClearBatch(MakeBulletDebugBatchId(InstanceId));
+                }
+            }
+        }
+#endif
+
         if (Info->Actor)
         {
             ReleaseBulletActor(Info->Actor);
@@ -799,7 +1254,6 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
         Params.Payload = ParentInfo.InitParams.Payload;
     }
     Params.ParentInstanceId = ParentInfo.InstanceId;
-    Params.SyncType = ParentInfo.InitParams.SyncType;
     return Params;
 }
 

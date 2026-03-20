@@ -62,6 +62,13 @@ public:
     // Clears both queued and persistent actions for a bullet (called during bullet destruction).
     void ClearBulletActions(int32 InstanceId);
 
+    // True while the runner is iterating action queues (used to avoid re-entrancy).
+    bool IsRunning() const { return State == EBulletActionRunnerState::Running; }
+
+    // Drain queued actions for a single bullet instance immediately.
+    // Safe to call from gameplay code after spawning, but should not be called while the runner is already Running.
+    void RunQueuedActionsForBullet(int32 InstanceId);
+
 private:
     // Executes a batch of actions for a single bullet. One-shot actions are released back to the action center pool.
     void ProcessActionList(FBulletInfo& BulletInfo, TArray<FBulletActionInfo>& ActionList);
