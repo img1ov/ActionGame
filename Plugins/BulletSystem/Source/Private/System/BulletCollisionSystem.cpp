@@ -39,16 +39,16 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
     #endif
 
     // Snapshot ids to keep iteration stable if hit logic queues new bullets (avoid TMap iterator invalidation).
-    TArray<int32> BulletIds;
-    BulletIds.Reserve(Model->GetBulletMap().Num());
+    TArray<int32> InstanceIds;
+    InstanceIds.Reserve(Model->GetBulletMap().Num());
     for (const auto& Pair : Model->GetBulletMap())
     {
-        BulletIds.Add(Pair.Key);
+        InstanceIds.Add(Pair.Key);
     }
 
-    for (int32 BulletId : BulletIds)
+    for (int32 InstanceId : InstanceIds)
     {
-        FBulletInfo* InfoPtr = Model->GetBullet(BulletId);
+        FBulletInfo* InfoPtr = Model->GetBullet(InstanceId);
         if (!InfoPtr)
         {
             continue;
@@ -125,7 +125,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             FHitResult ObstacleHit;
             if (const bool bObstacleHit = World->SweepSingleByChannel(ObstacleHit, Info.MoveInfo.LastLocation, Info.MoveInfo.Location, FQuat::Identity, ECC_WorldStatic, FCollisionShape::MakeSphere(ObstacleRadius), QueryParams))
             {
-                UE_LOG(LogBullet, Verbose, TEXT("Obstacle hit: BulletId=%d"), Info.BulletId);
+                UE_LOG(LogBullet, Verbose, TEXT("Obstacle hit: InstanceId=%d"), Info.InstanceId);
                 const bool bDestroyed = Controller->HandleHitResult(Info, ObstacleHit.GetActor(), ObstacleHit, true);
                 if (bDestroyed)
                 {
@@ -234,7 +234,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
 
             #if WITH_EDITOR
-            UE_LOG(LogBullet, VeryVerbose, TEXT("Overlap collect: BulletId=%d Count=%d"), Info.BulletId, Info.CollisionInfo.OverlapActors.Num());
+            UE_LOG(LogBullet, VeryVerbose, TEXT("Overlap collect: InstanceId=%d Count=%d"), Info.InstanceId, Info.CollisionInfo.OverlapActors.Num());
             if (Info.CollisionInfo.OverlapActors.Num() > 0)
             {
                 int32 Logged = 0;
@@ -395,7 +395,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             }
             Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
             #if WITH_EDITOR
-            UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep collect (manual): BulletId=%d Count=%d"), Info.BulletId, Info.CollisionInfo.OverlapActors.Num());
+            UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep collect (manual): InstanceId=%d Count=%d"), Info.InstanceId, Info.CollisionInfo.OverlapActors.Num());
             if (Info.CollisionInfo.OverlapActors.Num() > 0)
             {
                 int32 Logged = 0;
@@ -422,7 +422,7 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         }
 
         #if WITH_EDITOR
-        UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep hits: BulletId=%d Count=%d"), Info.BulletId, Hits.Num());
+        UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep hits: InstanceId=%d Count=%d"), Info.InstanceId, Hits.Num());
         #endif
         for (const FHitResult& Hit : Hits)
         {

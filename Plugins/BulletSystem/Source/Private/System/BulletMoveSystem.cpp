@@ -25,16 +25,16 @@ void UBulletMoveSystem::OnTick(float DeltaSeconds)
     const float WorldTime = Controller->GetWorldTimeSeconds();
 
     // Snapshot ids to keep iteration stable if logic spawns bullets mid-tick (avoids iterator invalidation / rehash).
-    TArray<int32> BulletIds;
-    BulletIds.Reserve(Model->GetBulletMap().Num());
+    TArray<int32> InstanceIds;
+    InstanceIds.Reserve(Model->GetBulletMap().Num());
     for (const auto& Pair : Model->GetBulletMap())
     {
-        BulletIds.Add(Pair.Key);
+        InstanceIds.Add(Pair.Key);
     }
 
-    for (int32 BulletId : BulletIds)
+    for (int32 InstanceId : InstanceIds)
     {
-        FBulletInfo* InfoPtr = Model->GetBullet(BulletId);
+        FBulletInfo* InfoPtr = Model->GetBullet(InstanceId);
         if (!InfoPtr)
         {
             continue;

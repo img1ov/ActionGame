@@ -6,9 +6,9 @@
 #include "Component/BulletBudgetComponent.h"
 #include "Component/BulletEntityComponent.h"
 
-void UBulletEntity::Initialize(int32 InBulletId)
+void UBulletEntity::Initialize(int32 InInstanceId)
 {
-    BulletId = InBulletId;
+    InstanceId = InInstanceId;
     if (!LogicComponent)
     {
         LogicComponent = NewObject<UBulletActionLogicComponent>(this);
@@ -36,7 +36,7 @@ void UBulletEntity::Initialize(int32 InBulletId)
 
 void UBulletEntity::Reset()
 {
-    BulletId = INDEX_NONE;
+    InstanceId = INDEX_NONE;
     for (UBulletEntityComponent* Component : Components)
     {
         if (Component)
@@ -46,9 +46,9 @@ void UBulletEntity::Reset()
     }
 }
 
-int32 UBulletEntity::GetBulletId() const
+int32 UBulletEntity::GetInstanceId() const
 {
-    return BulletId;
+    return InstanceId;
 }
 
 UBulletActionLogicComponent* UBulletEntity::GetLogicComponent() const

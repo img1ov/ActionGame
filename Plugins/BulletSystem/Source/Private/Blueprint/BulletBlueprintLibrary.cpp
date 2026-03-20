@@ -25,12 +25,12 @@ int32 UBulletBlueprintLibrary::SpawnBullet(const UObject* WorldContextObject, UB
         return INDEX_NONE;
     }
 
-    int32 BulletId = INDEX_NONE;
-    Subsystem->GetController()->SpawnBullet(InitParams, BulletID, BulletId, ConfigAsset);
-    return BulletId;
+    int32 InstanceId = INDEX_NONE;
+    Subsystem->GetController()->SpawnBullet(InitParams, BulletID, InstanceId, ConfigAsset);
+    return InstanceId;
 }
 
-bool UBulletBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren)
+bool UBulletBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren)
 {
     if (!WorldContextObject)
     {
@@ -49,11 +49,11 @@ bool UBulletBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, i
         return false;
     }
 
-    Subsystem->GetController()->RequestDestroyBullet(BulletId, Reason, bSpawnChildren);
+    Subsystem->GetController()->RequestDestroyBullet(InstanceId, Reason, bSpawnChildren);
     return true;
 }
 
-bool UBulletBlueprintLibrary::IsBulletValid(const UObject* WorldContextObject, int32 BulletId)
+bool UBulletBlueprintLibrary::IsBulletValid(const UObject* WorldContextObject, int32 InstanceId)
 {
     if (!WorldContextObject)
     {
@@ -73,10 +73,10 @@ bool UBulletBlueprintLibrary::IsBulletValid(const UObject* WorldContextObject, i
     }
 
     UBulletModel* Model = Subsystem->GetController()->GetModel();
-    return Model && Model->GetBullet(BulletId) != nullptr;
+    return Model && Model->GetBullet(InstanceId) != nullptr;
 }
 
-bool UBulletBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors)
+bool UBulletBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors)
 {
     if (!WorldContextObject)
     {
@@ -95,10 +95,10 @@ bool UBulletBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldCont
         return false;
     }
 
-    return Subsystem->GetController()->SetCollisionEnabled(BulletId, bEnabled, bClearOverlaps, bResetHitActors);
+    return Subsystem->GetController()->SetCollisionEnabled(InstanceId, bEnabled, bClearOverlaps, bResetHitActors);
 }
 
-bool UBulletBlueprintLibrary::ResetBulletHitActors(const UObject* WorldContextObject, int32 BulletId)
+bool UBulletBlueprintLibrary::ResetBulletHitActors(const UObject* WorldContextObject, int32 InstanceId)
 {
     if (!WorldContextObject)
     {
@@ -117,10 +117,10 @@ bool UBulletBlueprintLibrary::ResetBulletHitActors(const UObject* WorldContextOb
         return false;
     }
 
-    return Subsystem->GetController()->ResetHitActors(BulletId);
+    return Subsystem->GetController()->ResetHitActors(InstanceId);
 }
 
-int32 UBulletBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObject, int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
+int32 UBulletBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
 {
     if (!WorldContextObject)
     {
@@ -139,7 +139,7 @@ int32 UBulletBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObje
         return 0;
     }
 
-    return Subsystem->GetController()->ProcessManualHits(BulletId, bResetHitActorsBefore, bApplyCollisionResponse);
+    return Subsystem->GetController()->ProcessManualHits(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
 }
 
 const FBulletPayload& UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByName(FBulletPayload& Payload, FName DataName, float Magnitude)

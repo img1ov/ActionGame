@@ -52,7 +52,7 @@ public:
     void Resume();
 
     // Enqueue a one-shot action. If called while running, actions are deferred into FBulletInfo::NextActionInfoList.
-    void EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const;
+    void EnqueueAction(int32 InstanceId, const FBulletActionInfo& ActionInfo) const;
 
     // Drain queued actions for all bullets and then tick persistent actions.
     void Run(float DeltaSeconds);
@@ -60,7 +60,7 @@ public:
     void AfterTick(float DeltaSeconds);
 
     // Clears both queued and persistent actions for a bullet (called during bullet destruction).
-    void ClearBulletActions(int32 BulletId);
+    void ClearBulletActions(int32 InstanceId);
 
 private:
     // Executes a batch of actions for a single bullet. One-shot actions are released back to the action center pool.

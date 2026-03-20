@@ -32,7 +32,7 @@ void UBulletLogicCreateBulletController::OnHit(FBulletInfo& BulletInfo, const FH
     ActionInfo.ChildBulletID = CreateData->ChildBulletID;
     ActionInfo.SpawnCount = CreateData->Count;
     ActionInfo.SpreadAngle = CreateData->SpreadAngle;
-    Controller->EnqueueAction(BulletInfo.BulletId, ActionInfo);
+    Controller->EnqueueAction(BulletInfo.InstanceId, ActionInfo);
 }
 
 void UBulletLogicDestroyBulletController::OnBegin(FBulletInfo& BulletInfo)
@@ -50,7 +50,7 @@ void UBulletLogicDestroyBulletController::OnHit(FBulletInfo& BulletInfo, const F
         return;
     }
 
-    Controller->RequestDestroyBullet(BulletInfo.BulletId, DestroyData->Reason, false);
+    Controller->RequestDestroyBullet(BulletInfo.InstanceId, DestroyData->Reason, false);
 }
 
 void UBulletLogicForceController::OnBegin(FBulletInfo& BulletInfo)

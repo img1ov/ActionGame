@@ -22,7 +22,7 @@ void UBulletActionRunner::Resume()
     State = EBulletActionRunnerState::Idle;
 }
 
-void UBulletActionRunner::EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const
+void UBulletActionRunner::EnqueueAction(int32 InstanceId, const FBulletActionInfo& ActionInfo) const
 {
     if (!Controller)
     {
@@ -35,13 +35,13 @@ void UBulletActionRunner::EnqueueAction(int32 BulletId, const FBulletActionInfo&
         return;
     }
 
-    FBulletInfo* Info = Model->GetBullet(BulletId);
+    FBulletInfo* Info = Model->GetBullet(InstanceId);
     if (!Info)
     {
         return;
     }
 
-    if (ClearingBullets.Contains(BulletId))
+    if (ClearingBullets.Contains(InstanceId))
     {
         return;
     }
@@ -74,16 +74,16 @@ void UBulletActionRunner::Run(float DeltaSeconds)
     State = EBulletActionRunnerState::Running;
 
     // Snapshot active bullet ids to avoid iterator invalidation / TMap rehash while actions spawn or destroy bullets.
-    TArray<int32> BulletIds;
-    BulletIds.Reserve(Model->GetBulletMap().Num());
+    TArray<int32> InstanceIds;
+    InstanceIds.Reserve(Model->GetBulletMap().Num());
     for (const auto& Pair : Model->GetBulletMap())
     {
-        BulletIds.Add(Pair.Key);
+        InstanceIds.Add(Pair.Key);
     }
 
-    for (int32 BulletId : BulletIds)
+    for (int32 InstanceId : InstanceIds)
     {
-        FBulletInfo* InfoPtr = Model->GetBullet(BulletId);
+        FBulletInfo* InfoPtr = Model->GetBullet(InstanceId);
         if (!InfoPtr)
         {
             continue;
@@ -123,7 +123,7 @@ void UBulletActionRunner::AfterTick(float DeltaSeconds)
 {
     for (auto& Pair : PersistentActions)
     {
-        const int32 BulletId = Pair.Key;
+        const int32 InstanceId = Pair.Key;
         TArray<TObjectPtr<UBulletActionBase>>& Actions = Pair.Value.Actions;
 
         for (UBulletActionBase* Action : Actions)
@@ -135,7 +135,7 @@ void UBulletActionRunner::AfterTick(float DeltaSeconds)
 
             if (UBulletModel* Model = Controller ? Controller->GetModel() : nullptr)
             {
-                if (FBulletInfo* Info = Model->GetBullet(BulletId))
+                if (FBulletInfo* Info = Model->GetBullet(InstanceId))
                 {
                     if (Info->bNeedDestroy)
                     {
@@ -148,7 +148,7 @@ void UBulletActionRunner::AfterTick(float DeltaSeconds)
     }
 }
 
-void UBulletActionRunner::ClearBulletActions(int32 BulletId)
+void UBulletActionRunner::ClearBulletActions(int32 InstanceId)
 {
     if (!ActionCenter)
     {
@@ -157,20 +157,20 @@ void UBulletActionRunner::ClearBulletActions(int32 BulletId)
 
     const EBulletActionRunnerState PrevState = State;
     State = EBulletActionRunnerState::ClearBullet;
-    ClearingBullets.Add(BulletId);
+    ClearingBullets.Add(InstanceId);
 
-    if (FBulletActionList* Actions = PersistentActions.Find(BulletId))
+    if (FBulletActionList* Actions = PersistentActions.Find(InstanceId))
     {
         for (UBulletActionBase* Action : Actions->Actions)
         {
             ActionCenter->ReleaseAction(Action);
         }
-        PersistentActions.Remove(BulletId);
+        PersistentActions.Remove(InstanceId);
     }
 
     if (UBulletModel* Model = Controller ? Controller->GetModel() : nullptr)
     {
-        if (FBulletInfo* Info = Model->GetBullet(BulletId))
+        if (FBulletInfo* Info = Model->GetBullet(InstanceId))
         {
             for (const FBulletActionInfo& ActionInfo : Info->ActionInfoList)
             {
@@ -185,7 +185,7 @@ void UBulletActionRunner::ClearBulletActions(int32 BulletId)
         }
     }
 
-    ClearingBullets.Remove(BulletId);
+    ClearingBullets.Remove(InstanceId);
     State = PrevState;
 }
 
@@ -205,13 +205,13 @@ void UBulletActionRunner::ProcessActionList(FBulletInfo& BulletInfo, TArray<FBul
         }
 
         // Verbose log to trace action execution without spamming default logs.
-        UE_LOG(LogBullet, Verbose, TEXT("Action Execute: BulletId=%d ActionType=%d"), BulletInfo.BulletId, static_cast<int32>(ActionInfo.Type));
+        UE_LOG(LogBullet, Verbose, TEXT("Action Execute: InstanceId=%d ActionType=%d"), BulletInfo.InstanceId, static_cast<int32>(ActionInfo.Type));
 
         Action->Execute(Controller, BulletInfo, ActionInfo);
 
         if (Action->IsPersistent())
         {
-            PersistentActions.FindOrAdd(BulletInfo.BulletId).Actions.Add(Action);
+            PersistentActions.FindOrAdd(BulletInfo.InstanceId).Actions.Add(Action);
         }
         else
         {
@@ -226,7 +226,7 @@ void UBulletActionRunner::TickPersistentActions(float DeltaSeconds)
 {
     for (auto& Pair : PersistentActions)
     {
-        const int32 BulletId = Pair.Key;
+        const int32 InstanceId = Pair.Key;
         TArray<TObjectPtr<UBulletActionBase>>& Actions = Pair.Value.Actions;
 
         for (UBulletActionBase* Action : Actions)
@@ -238,7 +238,7 @@ void UBulletActionRunner::TickPersistentActions(float DeltaSeconds)
 
             if (UBulletModel* Model = Controller ? Controller->GetModel() : nullptr)
             {
-                if (FBulletInfo* Info = Model->GetBullet(BulletId))
+                if (FBulletInfo* Info = Model->GetBullet(InstanceId))
                 {
                     if (Info->bNeedDestroy)
                     {

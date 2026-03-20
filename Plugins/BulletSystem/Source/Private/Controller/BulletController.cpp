@@ -173,7 +173,7 @@ void UBulletController::OnAfterTick(float DeltaSeconds) const
 }
 
 // Resolve config by BulletID and enqueue initial actions.
-bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig) const
+bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutInstanceId, const UBulletConfig* OverrideConfig) const
 {
     if (BulletID.IsNone())
     {
@@ -199,11 +199,11 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
     }
 
     UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s"), *BulletID.ToString(), InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"));
-    return SpawnBulletByData(InitParams, Data, OutBulletId);
+    return SpawnBulletByData(InitParams, Data, OutInstanceId);
 }
 
 // Allocate a bullet entry and enqueue its init action.
-bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const
+bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId) const
 {
     if (!Model)
     {
@@ -218,20 +218,20 @@ bool UBulletController::SpawnBulletByData(const FBulletInitParams& InitParams, c
     }
 
     Info->SpawnWorldTime = GetWorldTimeSeconds();
-    OutBulletId = Info->BulletId;
+    OutInstanceId = Info->InstanceId;
     // Kick off the init action chain.
-    EnqueueAction(OutBulletId, {EBulletActionType::InitBullet});
+    EnqueueAction(OutInstanceId, {EBulletActionType::InitBullet});
 
     if (ConfigSubsystem)
     {
         ConfigSubsystem->RequestPreload(Data);
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: Id=%d BulletID=%s Simple=%s"), OutBulletId, *Data.BulletID.ToString(), Info->bIsSimple ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletID=%s Simple=%s"), OutInstanceId, *Data.BulletID.ToString(), Info->bIsSimple ? TEXT("true") : TEXT("false"));
     return true;
 }
 
-void UBulletController::EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const
+void UBulletController::EnqueueAction(int32 InstanceId, const FBulletActionInfo& ActionInfo) const
 {
     if (!ActionRunner)
     {
@@ -242,24 +242,24 @@ void UBulletController::EnqueueAction(int32 BulletId, const FBulletActionInfo& A
     {
         FBulletActionInfo PooledInfo = ActionCenter->AcquireActionInfo();
         PooledInfo = ActionInfo;
-        ActionRunner->EnqueueAction(BulletId, PooledInfo);
+        ActionRunner->EnqueueAction(InstanceId, PooledInfo);
         return;
     }
 
-    ActionRunner->EnqueueAction(BulletId, ActionInfo);
+    ActionRunner->EnqueueAction(InstanceId, ActionInfo);
 }
 
-void UBulletController::RequestDestroyBullet(int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren) const
+void UBulletController::RequestDestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const
 {
     FBulletActionInfo Info;
     Info.Type = EBulletActionType::DestroyBullet;
     Info.DestroyReason = Reason;
     Info.bSpawnChildren = bSpawnChildren;
-    EnqueueAction(BulletId, Info);
+    EnqueueAction(InstanceId, Info);
 
     if (Model)
     {
-        if (FBulletInfo* BulletInfo = Model->GetBullet(BulletId))
+        if (FBulletInfo* BulletInfo = Model->GetBullet(InstanceId))
         {
             if (BulletInfo->DestroyWorldTime < 0.0f)
             {
@@ -268,39 +268,39 @@ void UBulletController::RequestDestroyBullet(int32 BulletId, EBulletDestroyReaso
         }
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBullet: Id=%d Reason=%d SpawnChildren=%s"), BulletId, static_cast<int32>(Reason), bSpawnChildren ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBullet: InstanceId=%d Reason=%d SpawnChildren=%s"), InstanceId, static_cast<int32>(Reason), bSpawnChildren ? TEXT("true") : TEXT("false"));
 }
 
-void UBulletController::MarkBulletForDestroy(int32 BulletId) const
+void UBulletController::MarkBulletForDestroy(int32 InstanceId) const
 {
     if (Model)
     {
-        Model->MarkNeedDestroy(BulletId);
+        Model->MarkNeedDestroy(InstanceId);
     }
 }
 
-void UBulletController::GetChildBulletIds(int32 ParentBulletId, TArray<int32>& OutChildren) const
+void UBulletController::GetChildInstanceIds(int32 ParentInstanceId, TArray<int32>& OutChildren) const
 {
     OutChildren.Reset();
     if (Model)
     {
-        Model->GetChildBullets(ParentBulletId, OutChildren);
+        Model->GetChildBullets(ParentInstanceId, OutChildren);
     }
 }
 
-int32 UBulletController::GetParentBulletId(int32 ChildBulletId) const
+int32 UBulletController::GetParentInstanceId(int32 ChildInstanceId) const
 {
-    return Model ? Model->GetParentBulletId(ChildBulletId) : INDEX_NONE;
+    return Model ? Model->GetParentInstanceId(ChildInstanceId) : INDEX_NONE;
 }
 
-bool UBulletController::SetCollisionEnabled(int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const
+bool UBulletController::SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const
 {
     if (!Model)
     {
         return false;
     }
 
-    FBulletInfo* Info = Model->GetBullet(BulletId);
+    FBulletInfo* Info = Model->GetBullet(InstanceId);
     if (!Info)
     {
         return false;
@@ -323,14 +323,14 @@ bool UBulletController::SetCollisionEnabled(int32 BulletId, bool bEnabled, bool 
     return true;
 }
 
-bool UBulletController::ResetHitActors(int32 BulletId) const
+bool UBulletController::ResetHitActors(int32 InstanceId) const
 {
     if (!Model)
     {
         return false;
     }
 
-    FBulletInfo* Info = Model->GetBullet(BulletId);
+    FBulletInfo* Info = Model->GetBullet(InstanceId);
     if (!Info)
     {
         return false;
@@ -342,14 +342,14 @@ bool UBulletController::ResetHitActors(int32 BulletId) const
     return true;
 }
 
-int32 UBulletController::ProcessManualHits(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
+int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
 {
     if (!Model)
     {
         return 0;
     }
 
-    FBulletInfo* Info = Model->GetBullet(BulletId);
+    FBulletInfo* Info = Model->GetBullet(InstanceId);
     if (!Info || Info->bNeedDestroy)
     {
         return 0;
@@ -481,7 +481,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
         ActionInfo.InheritOwner = ChildData.bInheritOwner ? 1 : 0;
         ActionInfo.InheritTarget = ChildData.bInheritTarget ? 1 : 0;
         ActionInfo.InheritPayload = ChildData.bInheritPayload ? 1 : 0;
-        EnqueueAction(ParentInfo.BulletId, ActionInfo);
+        EnqueueAction(ParentInfo.InstanceId, ActionInfo);
     }
 }
 
@@ -575,7 +575,7 @@ void UBulletController::ReleaseBulletActor(ABulletActor* Actor) const
     }
 }
 
-int32 UBulletController::FindBulletIdByActor(const AActor* Actor) const
+int32 UBulletController::FindInstanceIdByActor(const AActor* Actor) const
 {
     if (!Actor || !Model)
     {
@@ -622,7 +622,7 @@ bool UBulletController::IsDebugDrawEnabled() const
 // Apply logic hooks, interact, child spawns, and collision response for a hit.
 bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse) const
 {
-    UE_LOG(LogBullet, Verbose, TEXT("HandleHitResult: BulletId=%d HitActor=%s"), Info.BulletId, HitActor ? *HitActor->GetName() : TEXT("None"));
+    UE_LOG(LogBullet, Verbose, TEXT("HandleHitResult: InstanceId=%d HitActor=%s"), Info.InstanceId, HitActor ? *HitActor->GetName() : TEXT("None"));
 
     if (Info.Entity && Info.Entity->GetLogicComponent())
     {
@@ -633,12 +633,12 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
 
         if (HitActor && HitActor->IsA<ABulletActor>())
         {
-            const int32 OtherBulletId = FindBulletIdByActor(HitActor);
-            if (OtherBulletId != INDEX_NONE)
+            const int32 OtherInstanceId = FindInstanceIdByActor(HitActor);
+            if (OtherInstanceId != INDEX_NONE)
             {
                 if (!Info.bIsSimple)
                 {
-                    Info.Entity->GetLogicComponent()->HandleOnHitBullet(Info, OtherBulletId);
+                    Info.Entity->GetLogicComponent()->HandleOnHitBullet(Info, OtherInstanceId);
                 }
             }
         }
@@ -649,7 +649,7 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
         if (HitActor->GetClass()->ImplementsInterface(UBulletInteractInterface::StaticClass()))
         {
             IBulletInteractInterface::Execute_OnBulletInteract(HitActor, Info, Hit);
-            UE_LOG(LogBullet, Verbose, TEXT("SceneInteract: BulletId=%d Actor=%s"), Info.BulletId, *HitActor->GetName());
+            UE_LOG(LogBullet, Verbose, TEXT("SceneInteract: InstanceId=%d Actor=%s"), Info.InstanceId, *HitActor->GetName());
         }
     }
 
@@ -674,8 +674,8 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
     case EBulletCollisionResponse::Destroy:
         if (bDestroyOnHit)
         {
-            UE_LOG(LogBullet, Verbose, TEXT("Hit response: Destroy (BulletId=%d)"), Info.BulletId);
-            RequestDestroyBullet(Info.BulletId, EBulletDestroyReason::Hit, true);
+            UE_LOG(LogBullet, Verbose, TEXT("Hit response: Destroy (InstanceId=%d)"), Info.InstanceId);
+            RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
             return true;
         }
         break;
@@ -704,8 +704,8 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
         }
         if (bDestroyOnHit)
         {
-            UE_LOG(LogBullet, Verbose, TEXT("Hit response: Support->Destroy (BulletId=%d)"), Info.BulletId);
-            RequestDestroyBullet(Info.BulletId, EBulletDestroyReason::Hit, true);
+            UE_LOG(LogBullet, Verbose, TEXT("Hit response: Support->Destroy (InstanceId=%d)"), Info.InstanceId);
+            RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
             return true;
         }
         break;
@@ -716,8 +716,8 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
 
     if (bHitLimitReached && !Info.bNeedDestroy)
     {
-        UE_LOG(LogBullet, Verbose, TEXT("Hit limit reached: Destroy (BulletId=%d)"), Info.BulletId);
-        RequestDestroyBullet(Info.BulletId, EBulletDestroyReason::Hit, true);
+        UE_LOG(LogBullet, Verbose, TEXT("Hit limit reached: Destroy (InstanceId=%d)"), Info.InstanceId);
+        RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
         return true;
     }
 
@@ -733,9 +733,9 @@ void UBulletController::FlushDestroyedBullets() const
     }
 
     TArray<int32> ToDestroy = Model->GetNeedDestroyBullets().Array();
-    for (int32 BulletId : ToDestroy)
+    for (int32 InstanceId : ToDestroy)
     {
-        FBulletInfo* Info = Model->GetBullet(BulletId);
+        FBulletInfo* Info = Model->GetBullet(InstanceId);
         if (!Info)
         {
             continue;
@@ -744,11 +744,11 @@ void UBulletController::FlushDestroyedBullets() const
         // Propagate parent destruction to existing child bullets (skip those spawned at destroy time).
         if (Info->DestroyWorldTime >= 0.0f)
         {
-            TArray<int32> ChildIds;
-            Model->GetChildBullets(BulletId, ChildIds);
-            for (int32 ChildId : ChildIds)
+            TArray<int32> ChildInstanceIds;
+            Model->GetChildBullets(InstanceId, ChildInstanceIds);
+            for (int32 ChildInstanceId : ChildInstanceIds)
             {
-                FBulletInfo* ChildInfo = Model->GetBullet(ChildId);
+                FBulletInfo* ChildInfo = Model->GetBullet(ChildInstanceId);
                 if (!ChildInfo || ChildInfo->bNeedDestroy)
                 {
                     continue;
@@ -759,13 +759,13 @@ void UBulletController::FlushDestroyedBullets() const
                     continue;
                 }
 
-                RequestDestroyBullet(ChildId, EBulletDestroyReason::ParentDestroyed, false);
+                RequestDestroyBullet(ChildInstanceId, EBulletDestroyReason::ParentDestroyed, false);
             }
         }
 
         if (ActionRunner)
         {
-            ActionRunner->ClearBulletActions(BulletId);
+            ActionRunner->ClearBulletActions(InstanceId);
         }
 
         if (Info->Actor)
@@ -779,9 +779,9 @@ void UBulletController::FlushDestroyedBullets() const
             BulletPool->ReleaseEntity(Info->Entity);
         }
 
-        Model->RemoveBullet(BulletId);
+        Model->RemoveBullet(InstanceId);
 
-        UE_LOG(LogBullet, Verbose, TEXT("Bullet destroyed and recycled: Id=%d"), BulletId);
+        UE_LOG(LogBullet, Verbose, TEXT("Bullet destroyed and recycled: InstanceId=%d"), InstanceId);
     }
 }
 
@@ -798,7 +798,7 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     {
         Params.Payload = ParentInfo.InitParams.Payload;
     }
-    Params.ParentBulletId = ParentInfo.BulletId;
+    Params.ParentInstanceId = ParentInfo.InstanceId;
     Params.SyncType = ParentInfo.InitParams.SyncType;
     return Params;
 }

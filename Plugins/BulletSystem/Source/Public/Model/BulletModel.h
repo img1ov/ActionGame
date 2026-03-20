@@ -19,24 +19,24 @@ public:
     // Runtime store for active bullets and their state.
     void Reserve(int32 Capacity);
     FBulletInfo* SpawnBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config);
-    FBulletInfo* GetBullet(int32 BulletId);
+    FBulletInfo* GetBullet(int32 InstanceId);
     const TMap<int32, FBulletInfo>& GetBulletMap() const;
     TMap<int32, FBulletInfo>& GetMutableBulletMap();
 
     // Mark a bullet for destruction at the end of the frame (controller will flush these).
-    void MarkNeedDestroy(int32 BulletId);
+    void MarkNeedDestroy(int32 InstanceId);
     const TSet<int32>& GetNeedDestroyBullets() const;
 
     // Parent/child bullet relationship tracking.
-    void GetChildBullets(int32 ParentBulletId, TArray<int32>& OutChildren) const;
-    int32 GetParentBulletId(int32 ChildBulletId) const;
+    void GetChildBullets(int32 ParentInstanceId, TArray<int32>& OutChildren) const;
+    int32 GetParentInstanceId(int32 ChildInstanceId) const;
 
-    void RemoveBullet(int32 BulletId);
+    void RemoveBullet(int32 InstanceId);
     void Clear();
 
 private:
-    void RegisterChild(int32 ParentBulletId, int32 ChildBulletId);
-    void UnregisterChild(int32 ChildBulletId);
+    void RegisterChild(int32 ParentInstanceId, int32 ChildInstanceId);
+    void UnregisterChild(int32 ChildInstanceId);
 
     // Primary runtime storage. Key is the runtime-generated bullet id.
     UPROPERTY()
@@ -54,6 +54,6 @@ private:
     TSet<int32> NeedDestroyBullets;
 
     // Monotonic id generator. Starts at 1 (0/INDEX_NONE reserved).
-    int32 NextBulletId = 1;
+    int32 NextInstanceId = 1;
 };
 

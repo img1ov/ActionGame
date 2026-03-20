@@ -659,7 +659,7 @@ struct FBulletInitParams
     FVector SpawnOffset = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    int32 ParentBulletId = INDEX_NONE;
+    int32 ParentInstanceId = INDEX_NONE;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     float OverrideLifeTime = -1.0f;

@@ -160,9 +160,9 @@ struct FBulletInfo
 {
     GENERATED_BODY()
 
-    // Runtime id assigned by the model. Unique within the current world/subsystem.
+    // Runtime instance id assigned by the model. Unique within the current world/subsystem.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
-    int32 BulletId = INDEX_NONE;
+    int32 InstanceId = INDEX_NONE;
 
     // Spawn parameters captured at creation time (owner/target/transform/ability ids, payload).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
@@ -216,9 +216,9 @@ struct FBulletInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     float SpawnWorldTime = 0.0f;
 
-    // Parent bullet id for child bullets (INDEX_NONE if no parent).
+    // Parent instance id for child bullets (INDEX_NONE if no parent).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
-    int32 ParentBulletId = INDEX_NONE;
+    int32 ParentInstanceId = INDEX_NONE;
 
     // World time when destroy action was triggered (used for parent-child lifecycle binding).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")

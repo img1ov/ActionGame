@@ -21,19 +21,19 @@ public:
     static int32 SpawnBullet(const UObject* WorldContextObject, UBulletConfig* ConfigAsset, FName BulletID, const FBulletInitParams& InitParams);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool DestroyBullet(const UObject* WorldContextObject, int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren);
+    static bool DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool IsBulletValid(const UObject* WorldContextObject, int32 BulletId);
+    static bool IsBulletValid(const UObject* WorldContextObject, int32 InstanceId);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors);
+    static bool SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool ResetBulletHitActors(const UObject* WorldContextObject, int32 BulletId);
+    static bool ResetBulletHitActors(const UObject* WorldContextObject, int32 InstanceId);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static int32 ProcessManualHits(const UObject* WorldContextObject, int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
+    static int32 ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
 
     // Payload (SetByCaller) helpers.
     // Write-side: only intended to be used before SpawnBullet (InitParams will be copied into runtime BulletInfo).

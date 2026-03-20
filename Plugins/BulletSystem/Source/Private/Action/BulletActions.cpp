@@ -42,32 +42,32 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
         }
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("InitBullet: Id=%d Simple=%s"), BulletInfo.BulletId, BulletInfo.bIsSimple ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("InitBullet: InstanceId=%d Simple=%s"), BulletInfo.InstanceId, BulletInfo.bIsSimple ? TEXT("true") : TEXT("false"));
 
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::InitHit});
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::InitMove});
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::InitCollision});
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::InitRender});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitHit});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitMove});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitCollision});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::InitRender});
 
     if (BulletInfo.Config.Summon.SummonClass)
     {
-        InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::SummonEntity});
+        InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::SummonEntity});
     }
 
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::UpdateAttackerFrozen});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::UpdateAttackerFrozen});
 
     if (BulletInfo.Config.Render.NiagaraSystem.ToSoftObjectPath().IsValid() || BulletInfo.Config.Render.StaticMesh.ToSoftObjectPath().IsValid())
     {
-        InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::UpdateEffect});
+        InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::UpdateEffect});
     }
 
     if (BulletInfo.Config.Interact.bEnableInteract || BulletInfo.Config.Obstacle.bEnableObstacle)
     {
-        InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::SceneInteract});
+        InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::SceneInteract});
     }
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::UpdateLiveTime});
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::TimeScale});
-    InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::AfterInit});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::UpdateLiveTime});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::TimeScale});
+    InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::AfterInit});
 
     bool bHasChildren = false;
     for (const FBulletDataChild& Child : BulletInfo.Config.Children)
@@ -80,7 +80,7 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
     }
     if (bHasChildren)
     {
-        InController->EnqueueAction(BulletInfo.BulletId, {EBulletActionType::Child});
+        InController->EnqueueAction(BulletInfo.InstanceId, {EBulletActionType::Child});
     }
 }
 
@@ -92,7 +92,7 @@ void UBulletActionInitHit::Execute(UBulletController* InController, FBulletInfo&
     BulletInfo.CollisionInfo.bHitThisFrame = false;
 
 #if WITH_EDITOR
-    UE_LOG(LogBullet, VeryVerbose, TEXT("InitHit: Id=%d"), BulletInfo.BulletId);
+    UE_LOG(LogBullet, VeryVerbose, TEXT("InitHit: InstanceId=%d"), BulletInfo.InstanceId);
 #endif
 }
 
@@ -195,7 +195,7 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
 
 #if WITH_EDITOR
     UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove: Id=%d MoveType=%d Loc=%s Vel=%s"),
-        BulletInfo.BulletId,
+        BulletInfo.InstanceId,
         static_cast<int32>(BulletInfo.Config.Move.MoveType),
         *BulletInfo.MoveInfo.Location.ToString(),
         *BulletInfo.MoveInfo.Velocity.ToString());
@@ -203,7 +203,7 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
     if (BulletInfo.Config.Move.MoveType == EBulletMoveType::FixedDuration)
     {
         UE_LOG(LogBullet, VeryVerbose, TEXT("InitMove FixedDuration: Id=%d Duration=%.3f Target=%s"),
-            BulletInfo.BulletId,
+            BulletInfo.InstanceId,
             BulletInfo.MoveInfo.FixedDuration,
             *BulletInfo.MoveInfo.FixedTargetLocation.ToString());
     }
@@ -221,7 +221,7 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
 
 #if WITH_EDITOR
     UE_LOG(LogBullet, VeryVerbose, TEXT("InitCollision: Id=%d Enabled=%s Mode=%d Shape=%d HitInterval=%.3f StartDelay=%.3f"),
-        BulletInfo.BulletId,
+        BulletInfo.InstanceId,
         BulletInfo.CollisionInfo.bCollisionEnabled ? TEXT("true") : TEXT("false"),
         static_cast<int32>(BulletInfo.Config.Base.CollisionMode),
         static_cast<int32>(BulletInfo.Config.Base.Shape),
@@ -244,7 +244,7 @@ void UBulletActionInitRender::Execute(UBulletController* InController, FBulletIn
     if (!bNeedActor)
     {
 #if WITH_EDITOR
-        UE_LOG(LogBullet, VeryVerbose, TEXT("InitRender skipped: Id=%d (no render config)"), BulletInfo.BulletId);
+        UE_LOG(LogBullet, VeryVerbose, TEXT("InitRender skipped: InstanceId=%d (no render config)"), BulletInfo.InstanceId);
 #endif
         return;
     }
@@ -279,7 +279,7 @@ void UBulletActionInitRender::Execute(UBulletController* InController, FBulletIn
 
 #if WITH_EDITOR
     UE_LOG(LogBullet, VeryVerbose, TEXT("InitRender: Id=%d Actor=%s"),
-        BulletInfo.BulletId,
+        BulletInfo.InstanceId,
         Actor ? *Actor->GetName() : TEXT("None"));
 #endif
 }
@@ -387,9 +387,9 @@ void UBulletActionDestroyBullet::Execute(UBulletController* InController, FBulle
         BulletInfo.EffectInfo.NiagaraComponent = nullptr;
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("DestroyBullet: Id=%d Reason=%d"), BulletInfo.BulletId, static_cast<int32>(ActionInfo.DestroyReason));
+    UE_LOG(LogBullet, Verbose, TEXT("DestroyBullet: InstanceId=%d Reason=%d"), BulletInfo.InstanceId, static_cast<int32>(ActionInfo.DestroyReason));
 
-    InController->MarkBulletForDestroy(BulletInfo.BulletId);
+    InController->MarkBulletForDestroy(BulletInfo.InstanceId);
 }
 
 void UBulletActionDelayDestroyBullet::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
@@ -412,8 +412,8 @@ void UBulletActionDelayDestroyBullet::Tick(UBulletController* InController, FBul
     BulletInfo.PendingDestroyDelay -= DeltaSeconds * BulletInfo.TimeScale;
     if (BulletInfo.PendingDestroyDelay <= 0.0f)
     {
-        UE_LOG(LogBullet, Verbose, TEXT("DelayDestroy elapsed: Id=%d"), BulletInfo.BulletId);
-        InController->RequestDestroyBullet(BulletInfo.BulletId, EBulletDestroyReason::External, true);
+        UE_LOG(LogBullet, Verbose, TEXT("DelayDestroy elapsed: InstanceId=%d"), BulletInfo.InstanceId);
+        InController->RequestDestroyBullet(BulletInfo.InstanceId, EBulletDestroyReason::External, true);
     }
 }
 
@@ -433,7 +433,7 @@ void UBulletActionSceneInteract::Execute(UBulletController* InController, FBulle
         BulletInfo.Tags.AddTag(InteractTag);
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("SceneInteract enabled: Id=%d"), BulletInfo.BulletId);
+    UE_LOG(LogBullet, Verbose, TEXT("SceneInteract enabled: InstanceId=%d"), BulletInfo.InstanceId);
 }
 
 void UBulletActionUpdateEffect::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
@@ -501,8 +501,8 @@ void UBulletActionUpdateLiveTime::Tick(UBulletController* InController, FBulletI
     const float LifeTime = BulletInfo.InitParams.OverrideLifeTime > 0.0f ? BulletInfo.InitParams.OverrideLifeTime : BulletInfo.Config.Base.LifeTime;
     if (LifeTime > 0.0f && BulletInfo.LiveTime >= LifeTime)
     {
-        UE_LOG(LogBullet, Verbose, TEXT("LifeTime expired: Id=%d"), BulletInfo.BulletId);
-        InController->RequestDestroyBullet(BulletInfo.BulletId, EBulletDestroyReason::LifeTimeExpired, true);
+        UE_LOG(LogBullet, Verbose, TEXT("LifeTime expired: InstanceId=%d"), BulletInfo.InstanceId);
+        InController->RequestDestroyBullet(BulletInfo.InstanceId, EBulletDestroyReason::LifeTimeExpired, true);
     }
 }
 
@@ -532,6 +532,6 @@ void UBulletActionUpdateAttackerFrozen::Execute(UBulletController* InController,
         BulletInfo.FrozenUntilTime = 0.0f;
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("UpdateAttackerFrozen: Id=%d Frozen=%s"), BulletInfo.BulletId, bOwnerFrozen ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogBullet, Verbose, TEXT("UpdateAttackerFrozen: InstanceId=%d Frozen=%s"), BulletInfo.InstanceId, bOwnerFrozen ? TEXT("true") : TEXT("false"));
 }
 

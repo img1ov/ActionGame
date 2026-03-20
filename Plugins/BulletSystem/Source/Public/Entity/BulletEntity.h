@@ -19,10 +19,10 @@ class BULLETGAME_API UBulletEntity : public UObject
     GENERATED_BODY()
 
 public:
-    void Initialize(int32 InBulletId);
+    void Initialize(int32 InInstanceId);
     void Reset();
 
-    int32 GetBulletId() const;
+    int32 GetInstanceId() const;
 
     UBulletActionLogicComponent* GetLogicComponent() const;
     UBulletActorComponent* GetActorComponent() const;
@@ -38,7 +38,7 @@ private:
     void RegisterComponent(UBulletEntityComponent* Component);
 
     UPROPERTY()
-    int32 BulletId = INDEX_NONE;
+    int32 InstanceId = INDEX_NONE;
 
     UPROPERTY()
     TObjectPtr<UBulletActionLogicComponent> LogicComponent;

@@ -198,12 +198,12 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 3. Controller 解析配置
    - `UBulletConfigSubsystem::GetBulletData(BulletID, OutData, Owner)`
 4. Model 创建运行态
-   - `UBulletModel::SpawnBullet()` 生成 `BulletId`
+   - `UBulletModel::SpawnBullet()` 生成 `InstanceId`
    - 从 `UBulletPool` 复用/创建 `UBulletEntity`
    - 写入 `FBulletInfo.InitParams / Config / Size / Parent` 等
      - 其中 `InitParams.Payload` 可携带“每次发射的实例数据”（常用于给可复用 GE 注入 SetByCaller 伤害）
 5. 入队生命周期 Action
-   - `EnqueueAction(BulletId, InitBullet)`
+   - `EnqueueAction(InstanceId, InitBullet)`
 
 ### 13.2 InitBullet 初始化流水线（动作链）
 
@@ -254,9 +254,9 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 - **OnHit**：`HandleHitResult(...)` 内部会调用 `RequestSummonChildren(Info, OnHit)`，再把 spawn 转为 `SummonBullet` Action 入队，避免 tick 中途改写运行态容器。
 - **OnDestroy**：销毁阶段同理会触发 `RequestSummonChildren(Info, OnDestroy)`（由 Destroy Action 统一调度，避免直接生成导致顺序/资源回收问题）。
 
-#### 13.4.3 继承与生命周期绑定（ParentBulletId / ParentDestroyed）
+#### 13.4.3 继承与生命周期绑定（ParentInstanceId / ParentDestroyed）
 
-- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / SyncType / ParentBulletId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
+- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / SyncType / ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
 - 当 Parent 被销毁时，系统会在 FlushDestroyedBullets 阶段传播 `ParentDestroyed` 给“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
 
 ## 14. 碰撞与命中（最容易踩坑的部分）
@@ -279,7 +279,7 @@ BulletSystem 的碰撞不是基于 `UBoxComponent/USphereComponent`，而是每 
 - `HitTrigger = Manual`
   - CollisionSystem 只会把命中的 Actor 收集到 `BulletInfo.CollisionInfo.OverlapActors`
   - 并不会派发 `HandleHitResult`，因此不会触发 OnHit
-  - 正确用法：在你需要结算的时机调用 `UBulletBlueprintLibrary::ProcessManualHits(BulletId, ...)`
+  - 正确用法：在你需要结算的时机调用 `UBulletBlueprintLibrary::ProcessManualHits(InstanceId, ...)`
 
 这也是 HitBox profile 的默认设计：HitBox = Overlap + Manual，适合“攻击帧/节奏点”手动结算。
 
@@ -456,18 +456,18 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 当 `Base.HitTrigger = Manual` 时，你可以把 HitBox 当成“持续收集碰撞的传感器”，然后在攻击帧调用：
 
-- `UBulletBlueprintLibrary::ProcessManualHits(WorldContext, BulletId, bResetHitActorsBefore, bApplyCollisionResponse)`
+- `UBulletBlueprintLibrary::ProcessManualHits(WorldContext, InstanceId, bResetHitActorsBefore, bApplyCollisionResponse)`
 
 它会把当前收集到的 `OverlapActors` 逐个走 `HandleHitResult`，从而触发 `OnHit` 逻辑链。
 
 #### 15.3.7 蓝图可用 API 速查（BulletBlueprintLibrary）
 
-- `SpawnBullet(WorldContext, ConfigAsset, BulletID, InitParams) -> BulletId`
-- `DestroyBullet(WorldContext, BulletId, Reason, bSpawnChildren)`
-- `IsBulletValid(WorldContext, BulletId)`
-- `SetBulletCollisionEnabled(WorldContext, BulletId, bEnabled, bClearOverlaps, bResetHitActors)`
-- `ResetBulletHitActors(WorldContext, BulletId)`
-- `ProcessManualHits(WorldContext, BulletId, bResetHitActorsBefore, bApplyCollisionResponse) -> AppliedCount`
+- `SpawnBullet(WorldContext, ConfigAsset, BulletID, InitParams) -> InstanceId`
+- `DestroyBullet(WorldContext, InstanceId, Reason, bSpawnChildren)`
+- `IsBulletValid(WorldContext, InstanceId)`
+- `SetBulletCollisionEnabled(WorldContext, InstanceId, bEnabled, bClearOverlaps, bResetHitActors)`
+- `ResetBulletHitActors(WorldContext, InstanceId)`
+- `ProcessManualHits(WorldContext, InstanceId, bResetHitActorsBefore, bApplyCollisionResponse) -> AppliedCount`
 - `SetInitParamsSetByCallerMagnitudeByName(InitParams, DataName, Magnitude)`（推荐，带执行引脚）
 - `SetInitParamsSetByCallerMagnitudeByTag(InitParams, DataTag, Magnitude)`（推荐，带执行引脚）
 - `SetPayloadSetByCallerMagnitudeByName(InitParams.Payload, DataName, Magnitude)`（可链式写法，注意它会修改入参）

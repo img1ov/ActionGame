@@ -51,29 +51,29 @@ public:
     void OnAfterTick(float DeltaSeconds) const;
 
     // Spawn a bullet by BulletID from config asset or subsystem.
-    bool SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutBulletId, const UBulletConfig* OverrideConfig = nullptr) const;
+    bool SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutInstanceId, const UBulletConfig* OverrideConfig = nullptr) const;
     // Spawn using a pre-resolved config struct.
-    bool SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutBulletId) const;
+    bool SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId) const;
 
     // Queue a lifecycle action for deterministic execution order.
-    void EnqueueAction(int32 BulletId, const FBulletActionInfo& ActionInfo) const;
+    void EnqueueAction(int32 InstanceId, const FBulletActionInfo& ActionInfo) const;
     // Request bullet destruction through the action pipeline.
-    void RequestDestroyBullet(int32 BulletId, EBulletDestroyReason Reason, bool bSpawnChildren) const;
+    void RequestDestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const;
     // Mark a bullet for destruction at end of tick.
-    void MarkBulletForDestroy(int32 BulletId) const;
+    void MarkBulletForDestroy(int32 InstanceId) const;
 
     // Runtime collision toggles and hit-cache management.
-    bool SetCollisionEnabled(int32 BulletId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const;
-    bool ResetHitActors(int32 BulletId) const;
+    bool SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const;
+    bool ResetHitActors(int32 InstanceId) const;
     // Manual-hit trigger: process stored overlaps as hits (fires OnHit logic chain, interact, collision response).
-    int32 ProcessManualHits(int32 BulletId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
+    int32 ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
 
     // Resolve a hit and apply response (logic hooks, interact, destroy/bounce/support).
     bool HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse) const;
 
     // Parent/child relationship helpers for hierarchical bullets.
-    void GetChildBulletIds(int32 ParentBulletId, TArray<int32>& OutChildren) const;
-    int32 GetParentBulletId(int32 ChildBulletId) const;
+    void GetChildInstanceIds(int32 ParentInstanceId, TArray<int32>& OutChildren) const;
+    int32 GetParentInstanceId(int32 ChildInstanceId) const;
 
     // Child/summon helpers used by actions and logic.
     void RequestSummonChildren(const FBulletInfo& ParentInfo, EBulletChildSpawnTrigger Trigger) const;
@@ -95,7 +95,7 @@ public:
     void ReleaseBulletActor(ABulletActor* Actor) const;
 
     // Reverse lookup from render actor to bullet id.
-    int32 FindBulletIdByActor(const AActor* Actor) const;
+    int32 FindInstanceIdByActor(const AActor* Actor) const;
 
     UBulletModel* GetModel() const;
     UBulletTraceElementPool* GetTraceElementPool() const;
@@ -106,7 +106,7 @@ public:
 private:
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
-    // Build child init params (owner/target inheritance).
+    // Build child init params (owner/target/payload inheritance).
     FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const;
     const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const;
 

@@ -4,10 +4,10 @@
 
 FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParams& InitParams, const FBulletDataMain& Config)
 {
-    const int32 BulletId = NextBulletId++;
+    const int32 InstanceId = NextInstanceId++;
 
-    FBulletInfo& Info = BulletMap.Add(BulletId);
-    Info.BulletId = BulletId;
+    FBulletInfo& Info = BulletMap.Add(InstanceId);
+    Info.InstanceId = InstanceId;
     Info.InitParams = InitParams;
     Info.Config = Config;
     Info.Tags = Config.Base.Tags;
@@ -18,7 +18,7 @@ FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParam
     Info.bNeedDestroy = false;
     Info.bIsSimple = Config.CheckSimpleBullet();
     Info.SpawnWorldTime = 0.0f;
-    Info.ParentBulletId = InitParams.ParentBulletId;
+    Info.ParentInstanceId = InitParams.ParentInstanceId;
     Info.DestroyWorldTime = -1.0f;
     Info.Size = (InitParams.SizeOverride.IsNearlyZero()) ? FVector::OneVector : InitParams.SizeOverride;
 
@@ -27,19 +27,19 @@ FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParam
         Info.Entity = Pool->AcquireEntity(this);
         if (Info.Entity)
         {
-            Info.Entity->Initialize(BulletId);
+            Info.Entity->Initialize(InstanceId);
         }
     }
 
-    if (InitParams.ParentBulletId != INDEX_NONE)
+    if (InitParams.ParentInstanceId != INDEX_NONE)
     {
-        RegisterChild(InitParams.ParentBulletId, BulletId);
+        RegisterChild(InitParams.ParentInstanceId, InstanceId);
     }
 
     if (InitParams.Owner)
     {
         const int32 OwnerId = InitParams.Owner->GetUniqueID();
-        AttackerBullets.FindOrAdd(OwnerId).Add(BulletId);
+        AttackerBullets.FindOrAdd(OwnerId).Add(InstanceId);
     }
 
     return &Info;
@@ -53,9 +53,9 @@ void UBulletModel::Reserve(int32 Capacity)
     }
 }
 
-FBulletInfo* UBulletModel::GetBullet(int32 BulletId)
+FBulletInfo* UBulletModel::GetBullet(int32 InstanceId)
 {
-    return BulletMap.Find(BulletId);
+    return BulletMap.Find(InstanceId);
 }
 
 const TMap<int32, FBulletInfo>& UBulletModel::GetBulletMap() const
@@ -68,9 +68,9 @@ TMap<int32, FBulletInfo>& UBulletModel::GetMutableBulletMap()
     return BulletMap;
 }
 
-void UBulletModel::MarkNeedDestroy(int32 BulletId)
+void UBulletModel::MarkNeedDestroy(int32 InstanceId)
 {
-    NeedDestroyBullets.Add(BulletId);
+    NeedDestroyBullets.Add(InstanceId);
 }
 
 const TSet<int32>& UBulletModel::GetNeedDestroyBullets() const
@@ -78,38 +78,38 @@ const TSet<int32>& UBulletModel::GetNeedDestroyBullets() const
     return NeedDestroyBullets;
 }
 
-void UBulletModel::GetChildBullets(int32 ParentBulletId, TArray<int32>& OutChildren) const
+void UBulletModel::GetChildBullets(int32 ParentInstanceId, TArray<int32>& OutChildren) const
 {
     OutChildren.Reset();
-    if (const TSet<int32>* Children = ParentToChildren.Find(ParentBulletId))
+    if (const TSet<int32>* Children = ParentToChildren.Find(ParentInstanceId))
     {
         OutChildren.Reserve(Children->Num());
-        for (int32 ChildId : *Children)
+        for (int32 ChildInstanceId : *Children)
         {
-            OutChildren.Add(ChildId);
+            OutChildren.Add(ChildInstanceId);
         }
     }
 }
 
-int32 UBulletModel::GetParentBulletId(int32 ChildBulletId) const
+int32 UBulletModel::GetParentInstanceId(int32 ChildInstanceId) const
 {
-    if (const int32* ParentId = ChildToParent.Find(ChildBulletId))
+    if (const int32* ParentId = ChildToParent.Find(ChildInstanceId))
     {
         return *ParentId;
     }
     return INDEX_NONE;
 }
 
-void UBulletModel::RemoveBullet(int32 BulletId)
+void UBulletModel::RemoveBullet(int32 InstanceId)
 {
-    if (FBulletInfo* Info = BulletMap.Find(BulletId))
+    if (FBulletInfo* Info = BulletMap.Find(InstanceId))
     {
         if (Info->InitParams.Owner)
         {
             const int32 OwnerId = Info->InitParams.Owner->GetUniqueID();
             if (TSet<int32>* Bullets = AttackerBullets.Find(OwnerId))
             {
-                Bullets->Remove(BulletId);
+                Bullets->Remove(InstanceId);
                 if (Bullets->Num() == 0)
                 {
                     AttackerBullets.Remove(OwnerId);
@@ -118,11 +118,11 @@ void UBulletModel::RemoveBullet(int32 BulletId)
         }
     }
 
-    UnregisterChild(BulletId);
-    ParentToChildren.Remove(BulletId);
+    UnregisterChild(InstanceId);
+    ParentToChildren.Remove(InstanceId);
 
-    BulletMap.Remove(BulletId);
-    NeedDestroyBullets.Remove(BulletId);
+    BulletMap.Remove(InstanceId);
+    NeedDestroyBullets.Remove(InstanceId);
 }
 
 void UBulletModel::Clear()
@@ -132,27 +132,27 @@ void UBulletModel::Clear()
     NeedDestroyBullets.Empty();
     ParentToChildren.Empty();
     ChildToParent.Empty();
-    NextBulletId = 1;
+    NextInstanceId = 1;
 }
 
-void UBulletModel::RegisterChild(int32 ParentBulletId, int32 ChildBulletId)
+void UBulletModel::RegisterChild(int32 ParentInstanceId, int32 ChildInstanceId)
 {
-    ParentToChildren.FindOrAdd(ParentBulletId).Add(ChildBulletId);
-    ChildToParent.Add(ChildBulletId, ParentBulletId);
+    ParentToChildren.FindOrAdd(ParentInstanceId).Add(ChildInstanceId);
+    ChildToParent.Add(ChildInstanceId, ParentInstanceId);
 }
 
-void UBulletModel::UnregisterChild(int32 ChildBulletId)
+void UBulletModel::UnregisterChild(int32 ChildInstanceId)
 {
-    if (int32* ParentId = ChildToParent.Find(ChildBulletId))
+    if (int32* ParentId = ChildToParent.Find(ChildInstanceId))
     {
         if (TSet<int32>* Children = ParentToChildren.Find(*ParentId))
         {
-            Children->Remove(ChildBulletId);
+            Children->Remove(ChildInstanceId);
             if (Children->Num() == 0)
             {
                 ParentToChildren.Remove(*ParentId);
             }
         }
-        ChildToParent.Remove(ChildBulletId);
+        ChildToParent.Remove(ChildInstanceId);
     }
 }
