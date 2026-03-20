@@ -333,6 +333,7 @@ void UBulletActionSummonBullet::Execute(UBulletController* InController, FBullet
         Spread,
         ActionInfo.InheritOwner,
         ActionInfo.InheritTarget,
+        ActionInfo.InheritPayload,
         ActionInfo.SpawnLocationOffset,
         ActionInfo.bSpawnLocationOffsetInSpawnSpace,
         ActionInfo.SpawnRotationOffset);

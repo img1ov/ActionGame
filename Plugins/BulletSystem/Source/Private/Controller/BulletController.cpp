@@ -480,6 +480,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
         ActionInfo.SpawnRotationOffset = ChildData.SpawnRotationOffset;
         ActionInfo.InheritOwner = ChildData.bInheritOwner ? 1 : 0;
         ActionInfo.InheritTarget = ChildData.bInheritTarget ? 1 : 0;
+        ActionInfo.InheritPayload = ChildData.bInheritPayload ? 1 : 0;
         EnqueueAction(ParentInfo.BulletId, ActionInfo);
     }
 }
@@ -491,6 +492,7 @@ void UBulletController::SpawnChildBulletsFromLogic(
     float SpreadAngle,
     int32 InheritOwnerOverride,
     int32 InheritTargetOverride,
+    int32 InheritPayloadOverride,
     const FVector& SpawnLocationOffset,
     bool bSpawnLocationOffsetInSpawnSpace,
     const FRotator& SpawnRotationOffset) const
@@ -511,8 +513,9 @@ void UBulletController::SpawnChildBulletsFromLogic(
     }
     const bool bInheritOwner = (InheritOwnerOverride >= 0) ? (InheritOwnerOverride != 0) : (MatchingChild ? MatchingChild->bInheritOwner : true);
     const bool bInheritTarget = (InheritTargetOverride >= 0) ? (InheritTargetOverride != 0) : (MatchingChild ? MatchingChild->bInheritTarget : true);
+    const bool bInheritPayload = (InheritPayloadOverride >= 0) ? (InheritPayloadOverride != 0) : (MatchingChild ? MatchingChild->bInheritPayload : true);
     // Copy parent-derived params up front to avoid referencing ParentInfo after map mutations.
-    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity, bInheritOwner, bInheritTarget);
+    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity, bInheritOwner, bInheritTarget, bInheritPayload);
 
     for (int32 Index = 0; Index < FinalCount; ++Index)
     {
@@ -782,7 +785,7 @@ void UBulletController::FlushDestroyedBullets() const
     }
 }
 
-FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget) const
+FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const
 {
     FBulletInitParams Params;
     Params.Owner = bInheritOwner ? ParentInfo.InitParams.Owner : nullptr;
@@ -791,7 +794,10 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     Params.SpawnTransform = ChildTransform;
     Params.ContextId = ParentInfo.InitParams.ContextId;
     Params.AbilityId = ParentInfo.InitParams.AbilityId;
-    Params.Payload = ParentInfo.InitParams.Payload;
+    if (bInheritPayload)
+    {
+        Params.Payload = ParentInfo.InitParams.Payload;
+    }
     Params.ParentBulletId = ParentInfo.BulletId;
     Params.SyncType = ParentInfo.InitParams.SyncType;
     return Params;

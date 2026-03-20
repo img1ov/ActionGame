@@ -166,6 +166,27 @@ const FBulletPayload& UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByT
     return Payload;
 }
 
+void UBulletBlueprintLibrary::SetInitParamsSetByCallerMagnitudeByName(FBulletInitParams& InitParams, FName DataName, float Magnitude)
+{
+    (void)SetPayloadSetByCallerMagnitudeByName(InitParams.Payload, DataName, Magnitude);
+}
+
+void UBulletBlueprintLibrary::SetInitParamsSetByCallerMagnitudeByTag(FBulletInitParams& InitParams, FGameplayTag DataTag, float Magnitude)
+{
+    (void)SetPayloadSetByCallerMagnitudeByTag(InitParams.Payload, DataTag, Magnitude);
+}
+
+void UBulletBlueprintLibrary::ClearPayload(FBulletPayload& Payload)
+{
+    Payload.SetByCallerNameMagnitudes.Reset();
+    Payload.SetByCallerTagMagnitudes.Reset();
+}
+
+void UBulletBlueprintLibrary::ClearInitParamsPayload(FBulletInitParams& InitParams)
+{
+    ClearPayload(InitParams.Payload);
+}
+
 bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByName(const FBulletInfo& BulletInfo, FName DataName, float& OutMagnitude)
 {
     const float* Found = DataName.IsNone() ? nullptr : BulletInfo.InitParams.Payload.SetByCallerNameMagnitudes.Find(DataName);
@@ -182,6 +203,32 @@ bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByName(const FBullet
 bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByTag(const FBulletInfo& BulletInfo, FGameplayTag DataTag, float& OutMagnitude)
 {
     const float* Found = DataTag.IsValid() ? BulletInfo.InitParams.Payload.SetByCallerTagMagnitudes.Find(DataTag) : nullptr;
+    if (!Found)
+    {
+        OutMagnitude = 0.0f;
+        return false;
+    }
+
+    OutMagnitude = *Found;
+    return true;
+}
+
+bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByNameFromPayload(const FBulletPayload& Payload, FName DataName, float& OutMagnitude)
+{
+    const float* Found = DataName.IsNone() ? nullptr : Payload.SetByCallerNameMagnitudes.Find(DataName);
+    if (!Found)
+    {
+        OutMagnitude = 0.0f;
+        return false;
+    }
+
+    OutMagnitude = *Found;
+    return true;
+}
+
+bool UBulletBlueprintLibrary::GetPayloadSetByCallerMagnitudeByTagFromPayload(const FBulletPayload& Payload, FGameplayTag DataTag, float& OutMagnitude)
+{
+    const float* Found = DataTag.IsValid() ? Payload.SetByCallerTagMagnitudes.Find(DataTag) : nullptr;
     if (!Found)
     {
         OutMagnitude = 0.0f;

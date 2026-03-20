@@ -84,6 +84,7 @@ public:
         float SpreadAngle,
         int32 InheritOwnerOverride = -1,
         int32 InheritTargetOverride = -1,
+        int32 InheritPayloadOverride = -1,
         const FVector& SpawnLocationOffset = FVector::ZeroVector,
         bool bSpawnLocationOffsetInSpawnSpace = true,
         const FRotator& SpawnRotationOffset = FRotator::ZeroRotator) const;
@@ -106,7 +107,7 @@ private:
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
     // Build child init params (owner/target inheritance).
-    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget) const;
+    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const;
     const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const;
 
     UPROPERTY()

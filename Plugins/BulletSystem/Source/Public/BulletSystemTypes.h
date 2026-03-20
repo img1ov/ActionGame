@@ -422,6 +422,10 @@ struct FBulletDataChild
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bInheritTarget = true;
 
+    /** If true, child inherits per-shot payload from parent bullet (InitParams.Payload). */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
+    bool bInheritPayload = true;
+
     /** If true, spawn these children when the parent bullet is destroyed. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bSpawnOnDestroy = false;
@@ -706,4 +710,9 @@ struct FBulletActionInfo
     // Optional inherit override for SummonBullet actions (-1 = use config or default true).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     int32 InheritTarget = -1;
+
+    // Optional inherit override for SummonBullet actions (-1 = use config or default true).
+    // Controls whether child inherits InitParams.Payload.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    int32 InheritPayload = -1;
 };

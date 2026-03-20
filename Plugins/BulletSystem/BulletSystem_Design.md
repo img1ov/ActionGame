@@ -246,7 +246,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 - `SpawnLocationOffset`：生成偏移
 - `bSpawnLocationOffsetInSpawnSpace`：偏移是否在 spawn transform 空间计算（否则按世界空间）
 - `SpawnRotationOffset`：生成旋转偏移
-- `bInheritOwner / bInheritTarget`：是否继承 Owner/Target（继承到 Child 的 `FBulletInitParams`）
+- `bInheritOwner / bInheritTarget / bInheritPayload`：是否继承 Owner/Target/Payload（继承到 Child 的 `FBulletInitParams`）
 
 #### 13.4.2 触发链路（OnCreate / OnHit / OnDestroy）
 
@@ -256,7 +256,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 
 #### 13.4.3 继承与生命周期绑定（ParentBulletId / ParentDestroyed）
 
-- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / SyncType / ParentBulletId` 等写入 Child 的 `FBulletInitParams`。
+- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / SyncType / ParentBulletId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
 - 当 Parent 被销毁时，系统会在 FlushDestroyedBullets 阶段传播 `ParentDestroyed` 给“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
 
 ## 14. 碰撞与命中（最容易踩坑的部分）
@@ -431,7 +431,7 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 #### 15.3.5.1 Payload 驱动的 SetByCaller（GA 伤害注入）
 
-当你想让 GA 计算伤害，但由子弹的 Hit 负责“命中时刻的结算与 ApplyGE”，推荐用 Payload 携带每次发射的动态数值：
+当你想让 GA 计算伤害，但由子弹的 Hit 负责“命中时刻的结算与 ApplyGE”，推荐用 Payload（类似 `GameplayEffectSpec` 的 per-shot 参数包）携带每次发射的动态数值：
 
 - GA/Gameplay 在 `SpawnBullet` 时写入：
   - `InitParams.Payload.SetByCallerNameMagnitudes` 或
@@ -441,6 +441,11 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - 命中时 `UBulletLogicController_ApplyGameplayEffect` 会创建 `GameplayEffectSpec`，把 Payload 的 SetByCaller 写入后再 Apply 到目标
 
 注意：Payload 在 `SpawnBullet` 时会被拷贝进运行态 `BulletInfo.InitParams`，Spawn 之后再改你手里的 `InitParams` 不会影响已经生成的子弹；运行时通常只读取 Payload（用于 GE 的 SetByCaller 注入）。
+
+子弹分裂/派生时的继承规则：
+
+- Child 默认会继承 Parent 的 Payload（用于“弹片同源伤害”等场景）
+- 如需阻断继承，在 `DataMain.Children` 对应条目里把 `bInheritPayload = false`
 
 设计约束：
 
@@ -463,10 +468,15 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - `SetBulletCollisionEnabled(WorldContext, BulletId, bEnabled, bClearOverlaps, bResetHitActors)`
 - `ResetBulletHitActors(WorldContext, BulletId)`
 - `ProcessManualHits(WorldContext, BulletId, bResetHitActorsBefore, bApplyCollisionResponse) -> AppliedCount`
-- `SetPayloadSetByCallerMagnitudeByName(InitParams, DataName, Magnitude)`
-- `SetPayloadSetByCallerMagnitudeByTag(InitParams, DataTag, Magnitude)`
+- `SetInitParamsSetByCallerMagnitudeByName(InitParams, DataName, Magnitude)`（推荐，带执行引脚）
+- `SetInitParamsSetByCallerMagnitudeByTag(InitParams, DataTag, Magnitude)`（推荐，带执行引脚）
+- `SetPayloadSetByCallerMagnitudeByName(InitParams.Payload, DataName, Magnitude)`（可链式写法，注意它会修改入参）
+- `SetPayloadSetByCallerMagnitudeByTag(InitParams.Payload, DataTag, Magnitude)`（可链式写法，注意它会修改入参）
+- `ClearInitParamsPayload(InitParams)` / `ClearPayload(Payload)`
 - `GetPayloadSetByCallerMagnitudeByName(BulletInfo, DataName) -> (bFound, Magnitude)`
 - `GetPayloadSetByCallerMagnitudeByTag(BulletInfo, DataTag) -> (bFound, Magnitude)`
+- `GetPayloadSetByCallerMagnitudeByNameFromPayload(Payload, DataName) -> (bFound, Magnitude)`
+- `GetPayloadSetByCallerMagnitudeByTagFromPayload(Payload, DataTag) -> (bFound, Magnitude)`
 
 ## 16. 配置案例
 

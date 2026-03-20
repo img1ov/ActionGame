@@ -43,10 +43,30 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
     static const FBulletPayload& SetPayloadSetByCallerMagnitudeByTag(UPARAM(ref) FBulletPayload& Payload, FGameplayTag DataTag, float Magnitude);
 
+    // Write-side convenience: mutate InitParams in-place with exec pins (recommended in Blueprints).
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem|Payload")
+    static void SetInitParamsSetByCallerMagnitudeByName(UPARAM(ref) FBulletInitParams& InitParams, FName DataName, float Magnitude);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem|Payload")
+    static void SetInitParamsSetByCallerMagnitudeByTag(UPARAM(ref) FBulletInitParams& InitParams, FGameplayTag DataTag, float Magnitude);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem|Payload")
+    static void ClearPayload(UPARAM(ref) FBulletPayload& Payload);
+
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem|Payload")
+    static void ClearInitParamsPayload(UPARAM(ref) FBulletInitParams& InitParams);
+
     // Read-side: runtime access from BulletInfo.
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
     static bool GetPayloadSetByCallerMagnitudeByName(const FBulletInfo& BulletInfo, FName DataName, float& OutMagnitude);
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
     static bool GetPayloadSetByCallerMagnitudeByTag(const FBulletInfo& BulletInfo, FGameplayTag DataTag, float& OutMagnitude);
+
+    // Read-side: access directly from a payload (useful pre-spawn in Blueprints without exposing the maps).
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
+    static bool GetPayloadSetByCallerMagnitudeByNameFromPayload(const FBulletPayload& Payload, FName DataName, float& OutMagnitude);
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
+    static bool GetPayloadSetByCallerMagnitudeByTagFromPayload(const FBulletPayload& Payload, FGameplayTag DataTag, float& OutMagnitude);
 };
