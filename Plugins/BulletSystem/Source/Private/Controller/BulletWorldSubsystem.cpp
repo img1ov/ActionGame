@@ -2,9 +2,8 @@
 // Runtime controller layer and orchestration.
 #include "Controller/BulletWorldSubsystem.h"
 #include "Controller/BulletController.h"
-#include "Config/BulletConfig.h"
 #include "Config/BulletSystemSettings.h"
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 #include "Engine/World.h"
 #include "GameDelegates.h"
 
@@ -74,16 +73,6 @@ void UBulletWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
         {
             Controller->Shutdown();
         }
-    
-        // Config subsystem is a GameInstance subsystem and can persist across PIE sessions.
-        // Clear caches so edits to DataTables/Inline rows reflect immediately without restarting the editor.
-        if (UGameInstance* GameInstance = InWorld.GetGameInstance())
-        {
-            if (UBulletConfigSubsystem* ConfigSubsystem = GameInstance->GetSubsystem<UBulletConfigSubsystem>())
-            {
-                ConfigSubsystem->ClearCaches(/*bRebuildRuntimeTable*/ true);
-            }
-        }
     }
 }
 
@@ -130,14 +119,6 @@ void UBulletWorldSubsystem::HandleWorldCleanup(UWorld* InWorld, bool bSessionEnd
         {
             Controller->Shutdown();
         }
-    
-        if (UGameInstance* GameInstance = InWorld->GetGameInstance())
-        {
-            if (UBulletConfigSubsystem* ConfigSubsystem = GameInstance->GetSubsystem<UBulletConfigSubsystem>())
-            {
-                ConfigSubsystem->ClearCaches(/*bRebuildRuntimeTable*/ true);
-            }
-        }
     }
 }
 
@@ -160,13 +141,5 @@ void UBulletWorldSubsystem::HandleEndPlayMap()
     if (Controller)
     {
         Controller->Shutdown();
-    }
-
-    if (UGameInstance* GameInstance = World->GetGameInstance())
-    {
-        if (UBulletConfigSubsystem* ConfigSubsystem = GameInstance->GetSubsystem<UBulletConfigSubsystem>())
-        {
-            ConfigSubsystem->ClearCaches(/*bRebuildRuntimeTable*/ true);
-        }
     }
 }

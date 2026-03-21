@@ -9,6 +9,7 @@
 #include "BulletWorldSubsystem.generated.h"
 
 class UBulletController;
+class AActor;
 
 UCLASS()
 class BULLETGAME_API UBulletWorldSubsystem : public UWorldSubsystem, public FTickableGameObject

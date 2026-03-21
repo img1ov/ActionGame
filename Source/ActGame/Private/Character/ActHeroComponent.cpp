@@ -10,6 +10,7 @@
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
+#include "Component/BulletSystemComponent.h"
 #include "Components/GameFrameworkComponentManager.h"
 #include "Input/ActInputComponent.h"
 #include "Input/ActInputCommandConfig.h"
@@ -162,6 +163,15 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 			// The player state holds the persistent data for this player (state that persists across deaths and multiple pawns).
 			// The ability system component and attribute sets live on the player state.
 			PawnExtComp->InitializeAbilitySystem(ActPS->GetActAbilitySystemComponent(), ActPS);
+
+			// Forward PawnData bullet config into the BulletSystemComponent (mirrors AbilitySet init flow).
+			if (PawnData && PawnData->BulletConfig)
+			{
+				if (UBulletSystemComponent* BulletComp = ActPS->FindComponentByClass<UBulletSystemComponent>())
+				{
+					BulletComp->SetBulletConfig(PawnData->BulletConfig);
+				}
+			}
 		}
 
 		if (AActPlayerController* ActPC = GetController<AActPlayerController>())

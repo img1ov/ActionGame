@@ -4,7 +4,7 @@
 #include "Controller/BulletController.h"
 #include "Model/BulletModel.h"
 #include "Model/BulletInfo.h"
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 
 void UBulletActionRunner::Initialize(UBulletController* InController, UBulletActionCenter* InActionCenter)
 {

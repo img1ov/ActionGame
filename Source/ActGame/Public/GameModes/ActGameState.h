@@ -4,11 +4,13 @@
 
 #include "ModularGameState.h"
 #include "AbilitySystemInterface.h"
+#include "Interface/BulletSystemInterface.h"
 
 #include "ActGameState.generated.h"
 
 class UActAbilitySystemComponent;
 class UActExperienceManagerComponent;
+class UBulletSystemComponent;
 class UObject;
 struct FFrame;
 
@@ -16,7 +18,7 @@ struct FFrame;
  * 
  */
 UCLASS()
-class ACTGAME_API AActGameState : public AModularGameStateBase, public IAbilitySystemInterface
+class ACTGAME_API AActGameState : public AModularGameStateBase, public IAbilitySystemInterface, public IBulletSystemInterface
 {
 	GENERATED_BODY()
 
@@ -34,6 +36,8 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	//~End of IAbilitySystemInterface
 
+	virtual UBulletSystemComponent* GetBulletSystemComponent_Implementation() const override;
+
 	UFUNCTION(BlueprintCallable, Category = "Act|GameState")
 	UActAbilitySystemComponent* GetActAbilitySystemComponent() const { return AbilitySystemComponent; }
 
@@ -47,4 +51,7 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Act|GameState")
 	TObjectPtr<UActAbilitySystemComponent> AbilitySystemComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Act|GameState")
+	TObjectPtr<UBulletSystemComponent> BulletSystemComponent;
 };

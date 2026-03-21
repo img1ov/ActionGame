@@ -142,5 +142,14 @@ public:
     // Apply only on server to avoid client-side prediction issues.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
     bool bApplyOnServerOnly = true;
+
+    // Optional dynamic tags granted by the spec (used for hit-react routing, etc).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
+    FGameplayTagContainer DynamicGrantedTags;
+
+    // If true, apply the effect to all actors accepted at the bullet's LastHitTime (typically the current frame).
+    // This is useful for "single dispatch" damage logic that wants the full hit batch.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
+    bool bApplyToAllHitActorsAtLastHitTime = false;
 };
 

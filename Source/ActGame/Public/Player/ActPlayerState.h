@@ -6,6 +6,7 @@
 #include "AbilitySystemInterface.h"
 #include "Character/ActPawnData.h"
 #include "Teams/ActTeamAgentInterface.h"
+#include "Interface/BulletSystemInterface.h"
 
 #include "ActPlayerState.generated.h"
 
@@ -18,6 +19,7 @@ class APlayerState;
 class UAbilitySystemComponent;
 class UActAbilitySystemComponent;
 class UActPawnData;
+class UBulletSystemComponent;
 
 class UObject;
 struct FFrame;
@@ -29,7 +31,7 @@ struct FGameplayTag;
  *	Base player state class used by this project.
  */
 UCLASS(MinimalAPI, Config = Game)
-class AActPlayerState : public AModularPlayerState, public IAbilitySystemInterface, public IActTeamAgentInterface
+class AActPlayerState : public AModularPlayerState, public IAbilitySystemInterface, public IActTeamAgentInterface, public IBulletSystemInterface
 {
 	GENERATED_BODY()
 
@@ -43,6 +45,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Act|PlayerState")
 	UActAbilitySystemComponent* GetActAbilitySystemComponent() const { return AbilitySystemComponent; }
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+
+	UE_API virtual UBulletSystemComponent* GetBulletSystemComponent_Implementation() const override;
 
 	template<class T>
 	const T* GetPawnData() const { return Cast<T>(PawnData); }
@@ -79,6 +83,9 @@ private:
 	// The ability system component sub-object used by player characters.
 	UPROPERTY(VisibleAnywhere, Category = "Act|PlayerState")
 	TObjectPtr<UActAbilitySystemComponent> AbilitySystemComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Act|PlayerState")
+	TObjectPtr<UBulletSystemComponent> BulletSystemComponent;
 
 	// Health attribute set used by this actor.
 	UPROPERTY()

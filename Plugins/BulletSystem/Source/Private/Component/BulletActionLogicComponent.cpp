@@ -5,7 +5,7 @@
 #include "Logic/BulletLogicController.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 
 void UBulletActionLogicComponent::Initialize(UBulletController* InController, UBulletEntity* InEntity, const FBulletDataExecution& ExecutionData)
 {

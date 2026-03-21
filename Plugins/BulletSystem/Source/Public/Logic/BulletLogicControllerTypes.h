@@ -4,8 +4,8 @@
 // Logic data assets and controllers.
 
 #include "CoreMinimal.h"
+#include "BulletLogicControllerBlueprintBase.h"
 #include "Engine/EngineTypes.h"
-#include "Model/BulletInfo.h"
 #include "Logic/BulletLogicController.h"
 #include "Logic/BulletLogicDataTypes.h"
 #include "BulletLogicControllerTypes.generated.h"
@@ -13,7 +13,7 @@
 class AActor;
 
 UCLASS()
-class BULLETGAME_API UBulletLogicCreateBulletController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicCreateBulletController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -23,7 +23,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicDestroyBulletController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicDestroyBulletController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -33,7 +33,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicForceController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicForceController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -42,7 +42,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicFreezeController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicFreezeController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -51,7 +51,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicReboundController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicReboundController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -60,7 +60,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicSupportController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicSupportController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -69,7 +69,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicCurveMovementController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicCurveMovementController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -78,7 +78,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicShieldController : public UBulletLogicController
+class BULLETGAME_API UBulletLogicShieldController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -87,7 +87,7 @@ public:
 };
 
 UCLASS(Blueprintable)
-class BULLETGAME_API UBulletLogicController_ApplyGameplayEffect : public UBulletLogicController
+class BULLETGAME_API UBulletLogicController_ApplyGameplayEffect : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -99,10 +99,22 @@ protected:
     bool ShouldApplyEffect(const FBulletInfo& BulletInfo, const FHitResult& Hit) const;
 
     // Blueprint hook to apply GAS effects (return true if handled).
-    UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|GAS")
-    bool ApplyEffectBlueprint(UBulletLogicData_ApplyGameplayEffect* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const;
+    UFUNCTION(BlueprintNativeEvent, DisplayName = "ApplyEffect", Category = "BulletSystem|GAS")
+    bool K2_ApplyEffect(UBulletLogicData_ApplyGameplayEffect* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const;
 
     UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|GAS")
     void OnEffectApplied(const FBulletInfo& BulletInfo, const FHitResult& Hit, bool bSuccess);
-};
 
+private:
+    bool ShouldSkipByNetMode(const UBulletLogicData_ApplyGameplayEffect* ApplyData) const;
+    bool ApplyEffectToTarget(
+        UBulletLogicData_ApplyGameplayEffect* ApplyData,
+        const FBulletInfo& BulletInfo,
+        AActor* SourceActor,
+        AActor* TargetActor,
+        const FHitResult& TargetHit) const;
+    static FHitResult BuildBestEffortHitForTarget(const FBulletInfo& BulletInfo, const FHitResult& FallbackHit, AActor* TargetActor);
+
+    // Used when bApplyToAllHitActorsAtLastHitTime is enabled to ensure we only apply once per hit batch.
+    float LastAppliedBatchHitTime = -BIG_NUMBER;
+};

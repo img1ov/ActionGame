@@ -3,6 +3,7 @@
 
 #include "Logic/BulletLogicControllerTypes.h"
 
+#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Actor/BulletActor.h"
@@ -145,6 +146,128 @@ void UBulletLogicShieldController::OnBegin(FBulletInfo& BulletInfo)
 
     BulletInfo.MoveInfo.bAttachToOwner = ShieldData->bAttachToOwner;
 }
+
+bool UBulletLogicController_ApplyGameplayEffect::ShouldSkipByNetMode(const UBulletLogicData_ApplyGameplayEffect* ApplyData) const
+{
+    if (!ApplyData || !Controller)
+    {
+        return true;
+    }
+
+    if (!ApplyData->bApplyOnServerOnly)
+    {
+        return false;
+    }
+
+    if (UWorld* World = Controller->GetWorld())
+    {
+        return World->IsNetMode(NM_Client);
+    }
+
+    return false;
+}
+
+bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
+    UBulletLogicData_ApplyGameplayEffect* ApplyData,
+    const FBulletInfo& BulletInfo,
+    AActor* SourceActor,
+    AActor* TargetActor,
+    const FHitResult& TargetHit) const
+{
+    if (!ApplyData || !SourceActor || !TargetActor)
+    {
+        return false;
+    }
+
+    // Blueprint override path.
+    if (K2_ApplyEffect(ApplyData, SourceActor, TargetActor, TargetHit, ApplyData->EffectLevel))
+    {
+        return true;
+    }
+
+    if (!ApplyData->GameplayEffect)
+    {
+        return false;
+    }
+
+    UAbilitySystemComponent* SourceASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(SourceActor);
+    UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
+    if (!SourceASC || !TargetASC)
+    {
+        return false;
+    }
+
+    FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
+    AActor* EffectCauser = BulletInfo.Actor ? Cast<AActor>(BulletInfo.Actor.Get()) : SourceActor;
+    Context.AddInstigator(SourceActor, EffectCauser);
+    Context.AddHitResult(TargetHit, true);
+
+    if (BulletInfo.Actor)
+    {
+        Context.AddSourceObject(BulletInfo.Actor.Get());
+    }
+    else if (BulletInfo.Entity)
+    {
+        Context.AddSourceObject(BulletInfo.Entity.Get());
+    }
+
+    FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(ApplyData->GameplayEffect, ApplyData->EffectLevel, Context);
+    if (!SpecHandle.IsValid() || !SpecHandle.Data.IsValid())
+    {
+        return false;
+    }
+
+    for (const TPair<FName, float>& Pair : BulletInfo.InitParams.Payload.SetByCallerNameMagnitudes)
+    {
+        if (!Pair.Key.IsNone())
+        {
+            UAbilitySystemBlueprintLibrary::AssignSetByCallerMagnitude(SpecHandle, Pair.Key, Pair.Value);
+        }
+    }
+
+    for (const TPair<FGameplayTag, float>& Pair : BulletInfo.InitParams.Payload.SetByCallerTagMagnitudes)
+    {
+        if (Pair.Key.IsValid())
+        {
+            UAbilitySystemBlueprintLibrary::AssignTagSetByCallerMagnitude(SpecHandle, Pair.Key, Pair.Value);
+        }
+    }
+
+    if (!ApplyData->DynamicGrantedTags.IsEmpty())
+    {
+        SpecHandle.Data->DynamicGrantedTags.AppendTags(ApplyData->DynamicGrantedTags);
+    }
+
+    const FActiveGameplayEffectHandle ActiveHandle = SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+    return ActiveHandle.IsValid();
+}
+
+FHitResult UBulletLogicController_ApplyGameplayEffect::BuildBestEffortHitForTarget(const FBulletInfo& BulletInfo, const FHitResult& FallbackHit, AActor* TargetActor)
+{
+    if (!TargetActor)
+    {
+        return FallbackHit;
+    }
+
+    if (FallbackHit.GetActor() == TargetActor)
+    {
+        return FallbackHit;
+    }
+
+    const FVector HitLocation = TargetActor->GetActorLocation();
+    const FVector TraceStart = BulletInfo.RayInfo.TraceStart.IsNearlyZero() ? FallbackHit.TraceStart : BulletInfo.RayInfo.TraceStart;
+    const FVector TraceEnd = BulletInfo.RayInfo.TraceEnd.IsNearlyZero() ? FallbackHit.TraceEnd : BulletInfo.RayInfo.TraceEnd;
+    const FVector HitNormal = (TraceEnd - TraceStart).GetSafeNormal();
+
+    FHitResult OutHit(TargetActor, nullptr, HitLocation, HitNormal);
+    OutHit.Location = HitLocation;
+    OutHit.ImpactPoint = HitLocation;
+    OutHit.TraceStart = TraceStart;
+    OutHit.TraceEnd = TraceEnd;
+    OutHit.ImpactNormal = HitNormal;
+    return OutHit;
+}
+
 void UBulletLogicController_ApplyGameplayEffect::OnHit(FBulletInfo& BulletInfo, const FHitResult& Hit)
 {
     UBulletLogicData_ApplyGameplayEffect* ApplyData = Cast<UBulletLogicData_ApplyGameplayEffect>(Data);
@@ -153,15 +276,9 @@ void UBulletLogicController_ApplyGameplayEffect::OnHit(FBulletInfo& BulletInfo, 
         return;
     }
 
-    if (ApplyData->bApplyOnServerOnly)
+    if (ShouldSkipByNetMode(ApplyData))
     {
-        if (UWorld* World = Controller->GetWorld())
-        {
-            if (World->IsNetMode(NM_Client))
-            {
-                return;
-            }
-        }
+        return;
     }
 
     if (!ShouldApplyEffect(BulletInfo, Hit))
@@ -170,66 +287,43 @@ void UBulletLogicController_ApplyGameplayEffect::OnHit(FBulletInfo& BulletInfo, 
     }
 
     AActor* SourceActor = BulletInfo.InitParams.Owner;
+
+    if (ApplyData->bApplyToAllHitActorsAtLastHitTime)
+    {
+        const float BatchHitTime = BulletInfo.CollisionInfo.LastHitTime;
+        if (FMath::IsNearlyEqual(LastAppliedBatchHitTime, BatchHitTime, 0.001f))
+        {
+            return;
+        }
+        LastAppliedBatchHitTime = BatchHitTime;
+
+        for (const TPair<TWeakObjectPtr<AActor>, float>& Pair : BulletInfo.CollisionInfo.HitActors)
+        {
+            if (!FMath::IsNearlyEqual(Pair.Value, BatchHitTime, 0.001f))
+            {
+                continue;
+            }
+
+            AActor* TargetActor = Pair.Key.Get();
+            if (!TargetActor)
+            {
+                continue;
+            }
+
+            const FHitResult TargetHit = BuildBestEffortHitForTarget(BulletInfo, Hit, TargetActor);
+            const bool bApplied = ApplyEffectToTarget(ApplyData, BulletInfo, SourceActor, TargetActor, TargetHit);
+            OnEffectApplied(BulletInfo, TargetHit, bApplied);
+        }
+        return;
+    }
+
     AActor* TargetActor = Hit.GetActor();
     if (!TargetActor)
     {
         TargetActor = BulletInfo.InitParams.TargetActor;
     }
 
-    bool bApplied = ApplyEffectBlueprint(ApplyData, SourceActor, TargetActor, Hit, ApplyData->EffectLevel);
-    if (!bApplied)
-    {
-        if (!SourceActor || !TargetActor || !ApplyData->GameplayEffect)
-        {
-            bApplied = false;
-        }
-        else
-        {
-            UAbilitySystemComponent* SourceASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(SourceActor);
-            UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
-            if (SourceASC && TargetASC)
-            {
-                FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
-
-                AActor* EffectCauser = BulletInfo.Actor ? Cast<AActor>(BulletInfo.Actor.Get()) : SourceActor;
-                Context.AddInstigator(SourceActor, EffectCauser);
-                Context.AddHitResult(Hit, true);
-
-                if (BulletInfo.Actor)
-                {
-                    Context.AddSourceObject(BulletInfo.Actor.Get());
-                }
-                else if (BulletInfo.Entity)
-                {
-                    Context.AddSourceObject(BulletInfo.Entity.Get());
-                }
-
-                FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(ApplyData->GameplayEffect, ApplyData->EffectLevel, Context);
-                if (SpecHandle.IsValid() && SpecHandle.Data.IsValid())
-                {
-                    for (const TPair<FName, float>& Pair : BulletInfo.InitParams.Payload.SetByCallerNameMagnitudes)
-                    {
-                        if (!Pair.Key.IsNone())
-                        {
-                            SpecHandle.Data->SetSetByCallerMagnitude(Pair.Key, Pair.Value);
-                        }
-                    }
-
-                    for (const TPair<FGameplayTag, float>& Pair : BulletInfo.InitParams.Payload.SetByCallerTagMagnitudes)
-                    {
-                        if (Pair.Key.IsValid())
-                        {
-                            SpecHandle.Data->SetSetByCallerMagnitude(Pair.Key, Pair.Value);
-                        }
-                    }
-
-                    const FActiveGameplayEffectHandle ActiveHandle = SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-                    bApplied = ActiveHandle.IsValid();
-                }
-            }
-        }
-    }
-
+    const bool bApplied = ApplyEffectToTarget(ApplyData, BulletInfo, SourceActor, TargetActor, Hit);
     OnEffectApplied(BulletInfo, Hit, bApplied);
 }
 
@@ -240,7 +334,7 @@ bool UBulletLogicController_ApplyGameplayEffect::ShouldApplyEffect_Implementatio
     return true;
 }
 
-bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectBlueprint_Implementation(UBulletLogicData_ApplyGameplayEffect* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const
+bool UBulletLogicController_ApplyGameplayEffect::K2_ApplyEffect_Implementation(UBulletLogicData_ApplyGameplayEffect* ApplyData, AActor* SourceActor, AActor* TargetActor, const FHitResult& Hit, float EffectLevel) const
 {
     (void)ApplyData;
     (void)SourceActor;

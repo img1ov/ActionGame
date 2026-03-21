@@ -19,7 +19,6 @@ class UBulletCollisionSystem;
 class UBulletPool;
 class UBulletActorPool;
 class UBulletTraceElementPool;
-class UBulletConfigSubsystem;
 class UBulletConfig;
 class ABulletActor;
 class AActor;
@@ -107,6 +106,8 @@ private:
     bool SpawnBulletByDataInternal(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId, UBulletConfig* SourceConfigAsset) const;
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
+    // Frame-end: clear hit caches requested by gameplay (keeps hit info valid for the current frame's logic chain).
+    void FlushDeferredHitActorResets() const;
     // Perform a collision query for manual-hit processing and return the current hit candidates.
     void CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const;
     // Build child init params (owner/target/payload inheritance).
@@ -144,9 +145,8 @@ private:
     UPROPERTY()
     TObjectPtr<UBulletCollisionSystem> CollisionSystem;
 
-    // Resolves bullet rows (config) and preloads their soft references.
-    UPROPERTY()
-    TObjectPtr<UBulletConfigSubsystem> ConfigSubsystem;
+    // InstanceIds queued to reset CollisionInfo.HitActors at end of frame (used by ProcessManualHits reset option).
+    mutable TSet<int32> DeferredHitActorsReset;
 
     bool bEnableDebugDraw = false;
 };

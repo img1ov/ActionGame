@@ -654,6 +654,11 @@ struct FBulletInitParams
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     int32 ContextId = INDEX_NONE;
 
+    // Optional stable id for external systems. BulletSystem runtime does not currently use this field.
+    // Not inherited to child bullets.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
+    int32 NetBulletId = INDEX_NONE;
+
     // Per-instance payload (typically filled by GA/Gameplay code at spawn time).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     FBulletPayload Payload;
@@ -669,6 +674,13 @@ struct FBulletInitParams
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     float OverrideLifeTime = -1.0f;
+
+    // Optional override for initial collision enabled state.
+    // -1: use FBulletDataBase::bCollisionEnabledOnSpawn
+    //  0: force collision disabled (visual-only bullets on clients)
+    //  1: force collision enabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init", meta = (ClampMin = "-1", ClampMax = "1"))
+    int32 CollisionEnabledOverride = -1;
 };
 
 USTRUCT(BlueprintType)

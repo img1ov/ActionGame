@@ -118,7 +118,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="ResetGameplayTagCounts")
 	UE_API void K2_ResetGameplayTagCounts(FGameplayTagContainer TagContainer, const int32 NewCount = 0) {ResetGameplayTagCounts(TagContainer, NewCount ); }
 
-	/** Spawn a bullet using PawnData->BulletConfig. */
+	/** Spawn a bullet using BulletSystemComponent (BulletConfig is injected during init from PawnData). */
 	UE_API int32 SpawnBullet(FName BulletID, const FBulletInitParams& InitParams) const;
 	
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="SpawnBullet")

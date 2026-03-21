@@ -8,6 +8,7 @@
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/ActCombatSet.h"
 #include "AbilitySystem/Attributes/ActHealthSet.h"
+#include "Component/BulletSystemComponent.h"
 #include "Player/ActPlayerController.h"
 #include "Character/ActPawnData.h"
 #include "GameModes/ActExperienceManagerComponent.h"
@@ -25,6 +26,9 @@ AActPlayerState::AActPlayerState(const FObjectInitializer& ObjectInitializer)
 	AbilitySystemComponent = ObjectInitializer.CreateDefaultSubobject<UActAbilitySystemComponent>(this, TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
+
+	BulletSystemComponent = ObjectInitializer.CreateDefaultSubobject<UBulletSystemComponent>(this, TEXT("BulletSystemComponent"));
+	BulletSystemComponent->SetIsReplicated(true);
 
 	// These attribute sets will be detected by AbilitySystemComponent::InitializeComponent. Keeping a reference so that the sets don't get garbage collected before that.
 	HealthSet = CreateDefaultSubobject<UActHealthSet>(TEXT("HealthSet"));
@@ -44,6 +48,11 @@ AActPlayerController* AActPlayerState::GetActPlayerController() const
 UAbilitySystemComponent* AActPlayerState::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
+}
+
+UBulletSystemComponent* AActPlayerState::GetBulletSystemComponent_Implementation() const
+{
+	return BulletSystemComponent;
 }
 
 void AActPlayerState::SetPawnData(const UActPawnData* InPawnData)

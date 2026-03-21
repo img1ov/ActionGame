@@ -44,8 +44,8 @@ LogicController / Render / Interact / Pool
 
 - **配置拆分清晰**：按领域拆解，不混杂逻辑与表现。
 - **简单子弹快速路径**：`CheckSimpleBullet()` 标记无逻辑/召唤/交互的子弹。
-- **配置缓存**：`UBulletConfigSubsystem` 提供全局与 Owner/Class 级缓存，降低查表成本。
-- **预加载**：对 LogicData/Niagara/Mesh 等资源做轻量预加载。
+- **配置缓存**：`UBulletConfig` 自身维护 BulletID -> Data 的运行时表缓存（懒构建/可重建），由 `BulletSystemComponent` 注入到运行时。
+- **可选预加载**：资源预热由外部加载策略负责（子弹系统只消费已注入配置，避免引擎全局缓存耦合）。
 
 ## 4. 控制层（BulletController）
 
@@ -61,8 +61,7 @@ LogicController / Render / Interact / Pool
 2. `MoveSystem.OnTick()`
 3. `CollisionSystem.OnTick()`
 4. 恢复 ActionRunner，执行生命周期 Action
-5. 预加载 Tick
-6. AfterTick：系统收尾与销毁清理
+5. AfterTick：系统收尾与销毁清理
 
 该顺序保证高频逻辑与生命周期编排互不干扰。
 
@@ -172,7 +171,8 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 - `BulletPool`：实体池
 - `BulletActorPool`：表现 Actor 池
 - `BulletTraceElementPool`：碰撞 Trace 临时对象池
-- `ConfigSubsystem`：配置缓存 + 预加载
+- `BulletConfig`：配置资产（运行时表缓存）
+- `BulletSystemComponent`：配置注入 + 最小网络 Spawn 分发
 - `BudgetComponent`：高频系统降采样更新
 
 目标是控制 GC 抖动、减少创建销毁开销、稳定帧率。
@@ -192,7 +192,6 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 - 实现位置：`UBulletWorldSubsystem`
   - BeginPlay: `OnWorldBeginPlay()` 按策略调用 `UBulletController::Shutdown()` 清空对象池与存活子弹
   - StopPlay: 监听 `FGameDelegates::EndPlayMapDelegate`（以及 WorldCleanup 兜底）按策略重置
-  - 同时会调用 `UBulletConfigSubsystem::ClearCaches(true)`，避免 DataTable/Inline 配置在 PIE 循环中命中旧缓存
 - 迭代/调试时可手动触发：
   - BP: `UBulletBlueprintLibrary::ClearBulletSystemRuntime(WorldContext, bRebuildRuntimeTable)`
 
@@ -220,16 +219,17 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 
 1. Gameplay 侧调用
    - C++: `UActAbilitySystemComponent::SpawnBullet()`
-   - BP: `UBulletBlueprintLibrary::SpawnBullet()`
-2. `UBulletWorldSubsystem` 获取 `UBulletController` 并调用 `SpawnBullet()`
-3. Controller 解析配置
-   - `UBulletConfigSubsystem::GetBulletData(BulletID, OutData, Owner)`
-4. Model 创建运行态
+   - BP: `UBulletSystemBlueprintLibrary::SpawnBullet(SourceActor, BulletID, InitParams)`
+2. `UBulletSystemBlueprintLibrary` 通过 `IBulletSystemInterface` 找到 `UBulletSystemComponent` 并转发 `SpawnBullet()`
+3. `UBulletSystemComponent` 调用 `UBulletWorldSubsystem -> UBulletController::SpawnBullet(..., ConfigAsset)` 创建实例
+4. Controller 解析配置
+   - `UBulletConfig::GetBulletData(BulletID, OutData)`
+5. Model 创建运行态
    - `UBulletModel::SpawnBullet()` 生成 `InstanceId`
    - 从 `UBulletPool` 复用/创建 `UBulletEntity`
    - 写入 `FBulletInfo.InitParams / Config / Size / Parent` 等
      - 其中 `InitParams.Payload` 可携带“每次发射的实例数据”（常用于给可复用 GE 注入 SetByCaller 伤害）
-5. 入队生命周期 Action
+6. 入队生命周期 Action
    - `EnqueueAction(InstanceId, InitBullet)`
 
 ### 13.2 InitBullet 初始化流水线（动作链）
@@ -274,7 +274,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 - `bSpawnLocationOffsetInSpawnSpace`：偏移是否在 spawn transform 空间计算（否则按世界空间）
 - `SpawnRotationOffset`：生成旋转偏移
 - `bInheritOwner / bInheritTarget / bInheritPayload`：是否继承 Owner/Target/Payload（继承到 Child 的 `FBulletInitParams`）
- - 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletID`，避免回退到 `UBulletConfigSubsystem` 的默认配置而导致“找不到子弹行”。
+ - 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletID`，避免因未注入配置导致“找不到子弹行”。
 
 #### 13.4.2 触发链路（OnCreate / OnHit / OnDestroy）
 

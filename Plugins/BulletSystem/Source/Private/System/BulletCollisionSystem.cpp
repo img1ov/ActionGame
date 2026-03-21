@@ -13,7 +13,7 @@
 #if WITH_EDITOR
 #include "Components/LineBatchComponent.h"
 #endif
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 
 void UBulletCollisionSystem::OnTick(float DeltaSeconds)
 {
@@ -267,6 +267,8 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 const FVector Start = Info.MoveInfo.LastLocation;
                 const FVector End = Info.MoveInfo.Location;
                 bAnyOverlap = World->LineTraceMultiByChannel(Hits, Start, End, Channel, QueryParams);
+                Info.RayInfo.TraceStart = Start;
+                Info.RayInfo.TraceEnd = End;
                 for (const FHitResult& Hit : Hits)
                 {
                     if (AActor* HitActor = Hit.GetActor())
@@ -473,6 +475,32 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             Info.CollisionInfo.OverlapActors.Reset();
             ReleaseTrace();
             continue;
+        }
+
+        // De-dup multi-component sweep/trace hits per actor to avoid applying OnHit multiple times for the same actor
+        // when HitInterval == 0 (common for single-hit projectiles).
+        if (Hits.Num() > 1)
+        {
+            TSet<TWeakObjectPtr<AActor>> SeenActors;
+            SeenActors.Reserve(Hits.Num());
+            TArray<FHitResult> UniqueHits;
+            UniqueHits.Reserve(Hits.Num());
+            for (const FHitResult& Hit : Hits)
+            {
+                AActor* HitActor = Hit.GetActor();
+                if (!HitActor)
+                {
+                    continue;
+                }
+                const TWeakObjectPtr<AActor> HitActorPtr(HitActor);
+                if (SeenActors.Contains(HitActorPtr))
+                {
+                    continue;
+                }
+                SeenActors.Add(HitActorPtr);
+                UniqueHits.Add(Hit);
+            }
+            Hits = MoveTemp(UniqueHits);
         }
 
         if (bManualHit)

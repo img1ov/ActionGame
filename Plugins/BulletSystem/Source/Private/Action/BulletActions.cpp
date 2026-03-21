@@ -12,7 +12,7 @@
 #include "NiagaraComponent.h"
 #include "Component/BulletBudgetComponent.h"
 #include "GameplayTagsManager.h"
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 
 // Initialize bullet state and enqueue follow-up init actions.
 void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
@@ -258,7 +258,14 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
     BulletInfo.CollisionInfo.HitActors.Reset();
     BulletInfo.CollisionInfo.HitCount = 0;
     BulletInfo.CollisionInfo.LastHitTime = -BIG_NUMBER;
-    BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
+    if (BulletInfo.InitParams.CollisionEnabledOverride >= 0)
+    {
+        BulletInfo.CollisionInfo.bCollisionEnabled = (BulletInfo.InitParams.CollisionEnabledOverride != 0);
+    }
+    else
+    {
+        BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
+    }
     BulletInfo.CollisionInfo.OverlapActors.Reset();
 
 #if WITH_EDITOR
@@ -278,6 +285,15 @@ void UBulletActionInitRender::Execute(UBulletController* InController, FBulletIn
     if (!InController)
     {
         return;
+    }
+
+    if (UWorld* World = InController->GetWorld())
+    {
+        // Dedicated server should not spend cycles/IO on purely visual bullet actors and assets.
+        if (World->IsNetMode(NM_DedicatedServer))
+        {
+            return;
+        }
     }
 
     const bool bNeedActor = BulletInfo.Config.Render.ActorClass != nullptr ||

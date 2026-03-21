@@ -9,7 +9,6 @@
 #include "Abilities/GameplayAbility.h"
 #include "Animation/ActAnimInstance.h"
 #include "Blueprint/BulletBlueprintLibrary.h"
-#include "Character/ActPawnData.h"
 #include "Player/ActPlayerState.h"
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_AbilityInputBlocked, "Gameplay.AbilityInputBlocked");
@@ -488,10 +487,7 @@ int32 UActAbilitySystemComponent::SpawnBullet(FName BulletID, const FBulletInitP
 	const AActPlayerState* ActPS = Cast<AActPlayerState>(GetOwnerActor());
 	if (!ActPS) return  INDEX_NONE;
 
-	const UActPawnData* PawnData = ActPS->GetPawnData<UActPawnData>();
-	if (!PawnData) return  INDEX_NONE;
-	
-	return UBulletBlueprintLibrary::SpawnBullet(ActPS, PawnData->BulletConfig, BulletID, InitParams);
+	return UBulletBlueprintLibrary::SpawnBullet(const_cast<AActPlayerState*>(ActPS), BulletID, InitParams);
 }
 
 int32 UActAbilitySystemComponent::K2_SpawnBullet(FName BulletID, const FBulletInitParams& InitParams)

@@ -6,6 +6,7 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayTagAssetInterface.h"
 #include "Teams/ActTeamAgentInterface.h"
+#include "Interface/BulletSystemInterface.h"
 
 #include "ActCharacter.generated.h"
 
@@ -20,6 +21,7 @@ class UActPawnData;
 class UActHealthComponent;
 class UActPawnExtensionComponent;
 class UActAbilitySystemComponent;
+class UBulletSystemComponent;
 struct FFrame;
 struct FGameplayTag;
 struct FGameplayTagContainer;
@@ -85,7 +87,7 @@ struct TStructOpsTypeTraits<FSharedRepMovement> : public TStructOpsTypeTraitsBas
  *	New behavior should be added via pawn components when possible.
  */
 UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "The base character pawn class used by this project."))
-class AActCharacter : public AModularCharacter, public IAbilitySystemInterface, public IGameplayTagAssetInterface, public IActTeamAgentInterface
+class AActCharacter : public AModularCharacter, public IAbilitySystemInterface, public IGameplayTagAssetInterface, public IActTeamAgentInterface, public IBulletSystemInterface
 {
 	GENERATED_BODY()
 
@@ -111,6 +113,8 @@ public:
 	UE_API virtual bool HasAnyMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const override;
 	
 	UE_API void ToggleCrouch();
+
+	UE_API virtual UBulletSystemComponent* GetBulletSystemComponent_Implementation() const override;
 
 	//~AActor interface
 	UE_API virtual void PreInitializeComponents() override;

@@ -11,6 +11,7 @@
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
+#include "Component/BulletSystemComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/ActPlayerController.h"
@@ -103,6 +104,20 @@ UAbilitySystemComponent* AActCharacter::GetAbilitySystemComponent() const
 	}
 
 	return PawnExtComponent->GetActAbilitySystemComponent();
+}
+
+UBulletSystemComponent* AActCharacter::GetBulletSystemComponent_Implementation() const
+{
+	if (AActPlayerState* ActPS = GetActPlayerState())
+	{
+		if (ActPS->GetClass()->ImplementsInterface(UBulletSystemInterface::StaticClass()))
+		{
+			return IBulletSystemInterface::Execute_GetBulletSystemComponent(ActPS);
+		}
+		return ActPS->FindComponentByClass<UBulletSystemComponent>();
+	}
+
+	return FindComponentByClass<UBulletSystemComponent>();
 }
 
 void AActCharacter::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const

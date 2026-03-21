@@ -1,7 +1,7 @@
 // BulletSystem: BulletController.cpp
 // Runtime controller layer and orchestration.
 #include "Controller/BulletController.h"
-#include "BulletLogChannel.h"
+#include "BulletLogChannels.h"
 #include "Config/BulletConfig.h"
 #include "Config/BulletSystemSettings.h"
 #include "Model/BulletModel.h"
@@ -16,7 +16,6 @@
 #include "Interact/BulletInteractInterface.h"
 #include "NiagaraComponent.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
 #include "GameFramework/Actor.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/AssetManager.h"
@@ -30,9 +29,6 @@
 void UBulletController::Initialize(UWorld* InWorld)
 {
     World = InWorld;
-
-    UGameInstance* GameInstance = InWorld ? InWorld->GetGameInstance() : nullptr;
-    ConfigSubsystem = GameInstance ? GameInstance->GetSubsystem<UBulletConfigSubsystem>() : nullptr;
 
     const UBulletSystemSettings* Settings = GetDefault<UBulletSystemSettings>();
     bEnableDebugDraw = Settings ? Settings->bEnableDebugDraw : false;
@@ -206,11 +202,6 @@ void UBulletController::OnTick(float DeltaSeconds) const
         ActionRunner->Resume();
         ActionRunner->Run(DeltaSeconds);
     }
-
-    if (ConfigSubsystem)
-    {
-        ConfigSubsystem->TickPreload(DeltaSeconds);
-    }
 }
 
 void UBulletController::OnAfterTick(float DeltaSeconds) const
@@ -238,7 +229,28 @@ void UBulletController::OnAfterTick(float DeltaSeconds) const
         ActionRunner->AfterTick(DeltaSeconds);
     }
 
+    // Frame-end maintenance that must happen after hit logic has run.
+    FlushDeferredHitActorResets();
+
     FlushDestroyedBullets();
+}
+
+void UBulletController::FlushDeferredHitActorResets() const
+{
+    if (!Model || DeferredHitActorsReset.Num() == 0)
+    {
+        DeferredHitActorsReset.Reset();
+        return;
+    }
+
+    for (const int32 InstanceId : DeferredHitActorsReset)
+    {
+        if (FBulletInfo* Info = Model->GetBullet(InstanceId))
+        {
+            Info->CollisionInfo.HitActors.Reset();
+        }
+    }
+    DeferredHitActorsReset.Reset();
 }
 
 // Resolve config by BulletID and enqueue initial actions.
@@ -254,43 +266,26 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
 
     if (OverrideConfig)
     {
-#if WITH_EDITOR
-        // When iterating in PIE, designers often tweak DataTables/config assets between Play sessions.
-        // UBulletConfig caches a runtime lookup table, so force a rebuild for override configs to avoid stale rows.
-        if (UWorld* WorldPtr = GetWorld())
-        {
-            if (WorldPtr->WorldType == EWorldType::PIE)
-            {
-                OverrideConfig->RebuildRuntimeTable();
-            }
-        }
-#endif
         bFound = OverrideConfig->GetBulletData(BulletID, Data);
-    }
-    else if (ConfigSubsystem)
-    {
-        bFound = ConfigSubsystem->GetBulletData(BulletID, Data, InitParams.Owner);
     }
 
     if (!bFound)
     {
-        UE_LOG(LogBullet, Warning, TEXT("BulletController: Bullet '%s' not found."), *BulletID.ToString());
+        UE_LOG(LogBullet, Warning, TEXT("BulletController: Bullet '%s' not found (Config=%s)."),
+            *BulletID.ToString(),
+            *GetNameSafe(OverrideConfig));
         return false;
     }
 
     UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s Config=%s"),
         *BulletID.ToString(),
         InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"),
-        OverrideConfig ? *OverrideConfig->GetName() : *GetNameSafe(ConfigSubsystem ? ConfigSubsystem->GetConfigAsset() : nullptr));
+        *GetNameSafe(OverrideConfig));
 
     UBulletConfig* SourceConfigAsset = nullptr;
     if (OverrideConfig)
     {
         SourceConfigAsset = const_cast<UBulletConfig*>(OverrideConfig);
-    }
-    else if (ConfigSubsystem)
-    {
-        SourceConfigAsset = ConfigSubsystem->GetConfigAsset();
     }
 
     return SpawnBulletByDataInternal(InitParams, Data, OutInstanceId, SourceConfigAsset);
@@ -327,11 +322,6 @@ bool UBulletController::SpawnBulletByDataInternal(const FBulletInitParams& InitP
     if (ActionRunner && !ActionRunner->IsRunning())
     {
         ActionRunner->RunQueuedActionsForBullet(OutInstanceId);
-    }
-
-    if (ConfigSubsystem)
-    {
-        ConfigSubsystem->RequestPreload(Data);
     }
 
     UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletID=%s Simple=%s SourceConfig=%s"),
@@ -827,9 +817,12 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
 
     if (bResetHitActorsBefore)
     {
+        // Treat this manual hit processing as a fresh batch, but defer the "final clear" to frame-end so any hit logic
+        // invoked during this call can still read HitActors in the current frame.
         Info->CollisionInfo.HitActors.Reset();
         Info->CollisionInfo.HitCount = 0;
         Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
+        DeferredHitActorsReset.Add(InstanceId);
     }
 
     TArray<FHitResult> Hits;
@@ -1273,6 +1266,7 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     Params.SpawnTransform = ChildTransform;
     Params.ContextId = ParentInfo.InitParams.ContextId;
     Params.AbilityId = ParentInfo.InitParams.AbilityId;
+    Params.CollisionEnabledOverride = ParentInfo.InitParams.CollisionEnabledOverride;
     if (bInheritPayload)
     {
         Params.Payload = ParentInfo.InitParams.Payload;
@@ -1298,4 +1292,3 @@ const FBulletDataChild* UBulletController::FindChildEntry(const FBulletInfo& Par
 
     return nullptr;
 }
-
