@@ -33,9 +33,9 @@ struct FBulletInstanceRegistry
 	UPROPERTY(Transient)
 	TMap<FName, int32> InstanceAliasMap;
 
-	void Clear() { InstanceAliasMap.Reset(); }
-	bool Remove(FName Alias) { return !Alias.IsNone() && InstanceAliasMap.Remove(Alias) > 0; }
-	void Set(FName Alias, int32 InstanceId)
+	void ClearAliasMap() { InstanceAliasMap.Reset(); }
+	bool RemoveAlias(FName Alias) { return !Alias.IsNone() && InstanceAliasMap.Remove(Alias) > 0; }
+	void AddToAliasMap(FName Alias, int32 InstanceId)
 	{
 		if (Alias.IsNone())
 		{
@@ -48,7 +48,8 @@ struct FBulletInstanceRegistry
 		}
 		InstanceAliasMap.Add(Alias, InstanceId);
 	}
-	int32 Get(FName Alias) const
+	
+	int32 GetInstanceAlias(FName Alias) const
 	{
 		if (Alias.IsNone())
 		{
@@ -97,7 +98,7 @@ public:
 
 	// Local spawn entry.
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
-	int32 SpawnBullet(FName BulletID, const FBulletInitParams& InitParams);
+	int32 SpawnBullet(FName BulletId, const FBulletInitParams& InitParams);
 
 	// Request destroy for a bullet instance (local).
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
@@ -108,7 +109,7 @@ public:
 	int32 ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
 
 private:
-	int32 SpawnBulletInternal(FName BulletID, const FBulletInitParams& InitParams);
+	int32 SpawnBulletInternal(FName BulletId, const FBulletInitParams& InitParams);
 	bool DestroyBulletInternal(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const;
 	int32 ProcessManualHitsInternal(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
 	bool IsInstanceIdValid(int32 InstanceId) const;
@@ -119,4 +120,3 @@ private:
 	UPROPERTY(Transient)
 	mutable FBulletInstanceRegistry InstanceRegistry;
 };
-

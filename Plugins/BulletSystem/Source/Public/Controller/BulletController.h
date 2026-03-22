@@ -49,8 +49,8 @@ public:
     // Post-tick stage used for cleanup and deferred destruction.
     void OnAfterTick(float DeltaSeconds) const;
 
-    // Spawn a bullet by BulletID from config asset or subsystem.
-    bool SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutInstanceId, const UBulletConfig* OverrideConfig = nullptr) const;
+    // Spawn a bullet by BulletId from config asset or subsystem.
+    bool SpawnBullet(const FBulletInitParams& InitParams, FName BulletId, int32& OutInstanceId, const UBulletConfig* OverrideConfig = nullptr) const;
     // Spawn using a pre-resolved config struct.
     bool SpawnBulletByData(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId) const;
 
@@ -78,7 +78,7 @@ public:
     void RequestSummonChildren(const FBulletInfo& ParentInfo, EBulletChildSpawnTrigger Trigger) const;
     void SpawnChildBulletsFromLogic(
         const FBulletInfo& ParentInfo,
-        FName ChildBulletID,
+        FName ChildBulletId,
         int32 Count,
         float SpreadAngle,
         int32 InheritOwnerOverride = -1,
@@ -112,7 +112,7 @@ private:
     void CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const;
     // Build child init params (owner/target/payload inheritance).
     FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const;
-    const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const;
+    const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletId) const;
 
     UPROPERTY()
     TWeakObjectPtr<UWorld> World;

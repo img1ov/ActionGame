@@ -68,11 +68,11 @@ namespace
 	}
 }
 
-void UAN_Bullet_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
+void UAN_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 
-	if (BulletID.IsNone())
+	if (BulletId.IsNone())
 	{
 		return;
 	}
@@ -84,9 +84,9 @@ void UAN_Bullet_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSeque
 		return;
 	}
 
-	// If no explicit alias is provided, fall back to BulletID. This keeps simple cases working
+	// If no explicit alias is provided, fall back to BulletId. This keeps simple cases working
 	// (single bullet per ability window) while still allowing explicit naming for complex flows.
-	const FName Alias = InstanceAlias.IsNone() ? BulletID : InstanceAlias;
+	const FName Alias = InstanceAlias.IsNone() ? BulletId : InstanceAlias;
 
 	if (IsSimulatedProxy(OwnerActor))
 	{
@@ -98,14 +98,14 @@ void UAN_Bullet_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSeque
 		{
 			InitParams.CollisionEnabledOverride = 1;
 		}
-		(void)BulletComp->SpawnBullet(BulletID, InitParams);
+		(void)BulletComp->SpawnBullet(BulletId, InitParams);
 		return;
 	}
 
 	if (SpawnEventTag.IsValid())
 	{
 		UBulletSystemNotifyPayload* PayloadObj = NewObject<UBulletSystemNotifyPayload>(OwnerActor);
-		PayloadObj->BulletID = BulletID;
+		PayloadObj->BulletId = BulletId;
 		PayloadObj->InstanceAlias = Alias;
 		SendBulletEvent(OwnerActor, SpawnEventTag, PayloadObj);
 		return;
@@ -116,10 +116,10 @@ void UAN_Bullet_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSeque
 	InitParams.Owner = OwnerActor;
 	InitParams.SpawnTransform = BuildSpawnTransform(MeshComp, SpawnSocketName);
 	InitParams.InstanceAlias = Alias;
-	(void)BulletComp->SpawnBullet(BulletID, InitParams);
+	(void)BulletComp->SpawnBullet(BulletId, InitParams);
 }
 
-void UAN_Bullet_ProcessManualHits::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
+void UAN_ProcessManualHits::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 
@@ -172,7 +172,7 @@ void UAN_Bullet_ProcessManualHits::Notify(USkeletalMeshComponent* MeshComp, UAni
 	}
 }
 
-void UAN_Bullet_DestroyBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
+void UAN_DestroyBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 
@@ -227,7 +227,7 @@ void UAN_Bullet_DestroyBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSeq
 	}
 }
 
-void UANS_Bullet_SpawnBullet::PostInitProperties()
+void UANS_SpawnBullet::PostInitProperties()
 {
 	Super::PostInitProperties();
 
@@ -242,7 +242,7 @@ void UANS_Bullet_SpawnBullet::PostInitProperties()
 	}
 }
 
-void UANS_Bullet_SpawnBullet::PostLoad()
+void UANS_SpawnBullet::PostLoad()
 {
 	Super::PostLoad();
 
@@ -257,7 +257,7 @@ void UANS_Bullet_SpawnBullet::PostLoad()
 	}
 }
 
-void UANS_Bullet_SpawnBullet::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+void UANS_SpawnBullet::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
 
@@ -269,16 +269,16 @@ void UANS_Bullet_SpawnBullet::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 	NotifyId = FName(*FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
 }
 
-FName UANS_Bullet_SpawnBullet::GetEffectiveAlias() const
+FName UANS_SpawnBullet::GetEffectiveAlias() const
 {
 	return InstanceAlias.IsNone() ? NotifyId : InstanceAlias;
 }
 
-void UANS_Bullet_SpawnBullet::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
+void UANS_SpawnBullet::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
 {
 	Super::NotifyBegin(MeshComp, Animation, TotalDuration, EventReference);
 
-	if (BulletID.IsNone())
+	if (BulletId.IsNone())
 	{
 		return;
 	}
@@ -302,14 +302,14 @@ void UANS_Bullet_SpawnBullet::NotifyBegin(USkeletalMeshComponent* MeshComp, UAni
 		{
 			InitParams.CollisionEnabledOverride = 1;
 		}
-		(void)BulletComp->SpawnBullet(BulletID, InitParams);
+		(void)BulletComp->SpawnBullet(BulletId, InitParams);
 		return;
 	}
 
 	if (SpawnEventTag.IsValid())
 	{
 		UBulletSystemNotifyPayload* PayloadObj = NewObject<UBulletSystemNotifyPayload>(OwnerActor);
-		PayloadObj->BulletID = BulletID;
+		PayloadObj->BulletId = BulletId;
 		PayloadObj->InstanceAlias = Alias;
 		SendBulletEvent(OwnerActor, SpawnEventTag, PayloadObj);
 		return;
@@ -319,10 +319,10 @@ void UANS_Bullet_SpawnBullet::NotifyBegin(USkeletalMeshComponent* MeshComp, UAni
 	InitParams.Owner = OwnerActor;
 	InitParams.SpawnTransform = BuildSpawnTransform(MeshComp, SpawnSocketName);
 	InitParams.InstanceAlias = Alias;
-	(void)BulletComp->SpawnBullet(BulletID, InitParams);
+	(void)BulletComp->SpawnBullet(BulletId, InitParams);
 }
 
-void UANS_Bullet_SpawnBullet::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
+void UANS_SpawnBullet::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::NotifyEnd(MeshComp, Animation, EventReference);
 

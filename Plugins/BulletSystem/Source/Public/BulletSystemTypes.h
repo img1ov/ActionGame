@@ -405,9 +405,9 @@ struct FBulletDataChild
 {
     GENERATED_BODY()
 
-    /** BulletID to spawn as a child (looked up in config). */
+    /** BulletId to spawn as a child (looked up in config). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
-    FName ChildBulletID;
+    FName ChildBulletId;
 
     /** Number of child bullets to spawn when triggered. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (ClampMin = "0"))
@@ -481,7 +481,7 @@ struct FBulletDataMain : public FTableRowBase
 
     /** Primary identifier for this row. If used in a DataTable, RowName can also act as id depending on loader. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
-    FName BulletID;
+    FName BulletId;
 
     /** Convenience profile: auto-fills some defaults in editor (HitBox/Projectile/Custom). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Main")
@@ -528,7 +528,7 @@ struct FBulletDataMain : public FTableRowBase
     FBulletDataSummon Summon;
 
     /** Child bullet spawners triggered on hit/destroy (see FBulletDataChild flags). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (TitleProperty = "ChildBulletID"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children", meta = (TitleProperty = "ChildBulletId"))
     TArray<FBulletDataChild> Children;
 
     /** Extra static obstacle checks. */
@@ -546,7 +546,7 @@ struct FBulletDataMain : public FTableRowBase
         bool bHasChildren = false;
         for (const FBulletDataChild& Child : Children)
         {
-            if (!Child.ChildBulletID.IsNone() && Child.Count > 0)
+            if (!Child.ChildBulletId.IsNone() && Child.Count > 0)
             {
                 bHasChildren = true;
                 break;
@@ -706,7 +706,7 @@ struct FBulletActionInfo
     bool bSpawnChildren = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
-    FName ChildBulletID;
+    FName ChildBulletId;
 
     // Optional override for SummonBullet actions (-1 = use matching child config Count).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")

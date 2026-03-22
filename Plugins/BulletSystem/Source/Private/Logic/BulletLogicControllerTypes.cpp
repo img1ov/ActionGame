@@ -30,7 +30,7 @@ void UBulletLogicCreateBulletController::OnHit(FBulletInfo& BulletInfo, const FH
 
     FBulletActionInfo ActionInfo;
     ActionInfo.Type = EBulletActionType::SummonBullet;
-    ActionInfo.ChildBulletID = CreateData->ChildBulletID;
+    ActionInfo.ChildBulletId = CreateData->ChildBulletId;
     ActionInfo.SpawnCount = CreateData->Count;
     ActionInfo.SpreadAngle = CreateData->SpreadAngle;
     Controller->EnqueueAction(BulletInfo.InstanceId, ActionInfo);

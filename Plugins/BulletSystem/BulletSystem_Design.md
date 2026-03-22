@@ -44,7 +44,7 @@ LogicController / Render / Interact / Pool
 
 - **配置拆分清晰**：按领域拆解，不混杂逻辑与表现。
 - **简单子弹快速路径**：`CheckSimpleBullet()` 标记无逻辑/召唤/交互的子弹。
-- **配置缓存**：`UBulletConfig` 自身维护 BulletID -> Data 的运行时表缓存（懒构建/可重建），由 `BulletSystemComponent` 注入到运行时。
+- **配置缓存**：`UBulletConfig` 自身维护 BulletId -> Data 的运行时表缓存（懒构建/可重建），由 `BulletSystemComponent` 注入到运行时。
 - **可选预加载**：资源预热由外部加载策略负责（子弹系统只消费已注入配置，避免引擎全局缓存耦合）。
 
 ## 4. 控制层（BulletController）
@@ -219,11 +219,11 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 
 1. Gameplay 侧调用
    - C++: `UActAbilitySystemComponent::SpawnBullet()`
-   - BP: `UBulletSystemBlueprintLibrary::SpawnBullet(SourceActor, BulletID, InitParams)`
+   - BP: `UBulletSystemBlueprintLibrary::SpawnBullet(SourceActor, BulletId, InitParams)`
 2. `UBulletSystemBlueprintLibrary` 通过 `IBulletSystemInterface` 找到 `UBulletSystemComponent` 并转发 `SpawnBullet()`
 3. `UBulletSystemComponent` 调用 `UBulletWorldSubsystem -> UBulletController::SpawnBullet(..., ConfigAsset)` 创建实例
 4. Controller 解析配置
-   - `UBulletConfig::GetBulletData(BulletID, OutData)`
+   - `UBulletConfig::GetBulletData(BulletId, OutData)`
 5. Model 创建运行态
    - `UBulletModel::SpawnBullet()` 生成 `InstanceId`
    - 从 `UBulletPool` 复用/创建 `UBulletEntity`
@@ -267,14 +267,14 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 
 每条 `FBulletDataChild` 代表一种派生规则，常用字段语义如下：
 
-- `ChildBulletID`：要生成的子弹配置 ID
+- `ChildBulletId`：要生成的子弹配置 ID
 - `Count`：生成数量
 - `bSpawnOnHit / bSpawnOnDestroy`：触发时机（命中 / 销毁）；都为 false 时等价于 “OnCreate”
 - `SpawnLocationOffset`：生成偏移
 - `bSpawnLocationOffsetInSpawnSpace`：偏移是否在 spawn transform 空间计算（否则按世界空间）
 - `SpawnRotationOffset`：生成旋转偏移
 - `bInheritOwner / bInheritTarget / bInheritPayload`：是否继承 Owner/Target/Payload（继承到 Child 的 `FBulletInitParams`）
- - 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletID`，避免因未注入配置导致“找不到子弹行”。
+- 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletId`，避免因未注入配置导致“找不到子弹行”。
 
 #### 13.4.2 触发链路（OnCreate / OnHit / OnDestroy）
 
@@ -490,7 +490,7 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 #### 15.3.7 蓝图可用 API 速查（BulletBlueprintLibrary）
 
-- `SpawnBullet(WorldContext, ConfigAsset, BulletID, InitParams) -> InstanceId`
+- `SpawnBullet(WorldContext, ConfigAsset, BulletId, InitParams) -> InstanceId`
 - `DestroyBullet(WorldContext, InstanceId, Reason, bSpawnChildren)`
 - `IsBulletValid(WorldContext, InstanceId)`
 - `SetBulletCollisionEnabled(WorldContext, InstanceId, bEnabled, bClearOverlaps, bResetHitActors)`
@@ -573,7 +573,7 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 BulletSystem 引入了 **InstanceAlias**：
 
-- `AN_Bullet_SpawnBullet`：写入 `InitParams.InstanceAlias`（推荐显式配置）。如果未配置，则默认用 `BulletID` 作为别名。Spawn 后由 `UBulletSystemComponent` 的 `FBulletInstanceRegistry` 将 `Alias -> InstanceId` 写入运行时表。
+- `AN_Bullet_SpawnBullet`：写入 `InitParams.InstanceAlias`（推荐显式配置）。如果未配置，则默认用 `BulletId` 作为别名。Spawn 后由 `UBulletSystemComponent` 的 `FBulletInstanceRegistry` 将 `Alias -> InstanceId` 写入运行时表。
 - `AN_Bullet_ProcessManualHits` / `AN_Bullet_DestroyBullet`：用同一个 `InstanceAlias` 解析到 `InstanceId`，再调用 `ProcessManualHits/DestroyBullet`。
 
 ### 18.2 ANS_Bullet_SpawnBullet（窗口型）

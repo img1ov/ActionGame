@@ -19,7 +19,7 @@ public:
     UBulletLogicDataCreateBullet();
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Create")
-    FName ChildBulletID;
+    FName ChildBulletId;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Create", meta = (ClampMin = "0"))
     int32 Count = 1;

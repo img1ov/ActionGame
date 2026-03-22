@@ -9,7 +9,7 @@
 #include "Model/BulletModel.h"
 #include "Engine/World.h"
 
-int32 UBulletSystemBlueprintLibrary::SpawnBullet(AActor* SourceActor, FName BulletID, const FBulletInitParams& InitParams)
+int32 UBulletSystemBlueprintLibrary::SpawnBullet(AActor* SourceActor, FName BulletId, const FBulletInitParams& InitParams)
 {
     if (!SourceActor)
     {
@@ -29,13 +29,13 @@ int32 UBulletSystemBlueprintLibrary::SpawnBullet(AActor* SourceActor, FName Bull
 
     if (!BulletComponent)
     {
-        UE_LOG(LogBullet, Warning, TEXT("BulletSystemBlueprintLibrary: SpawnBullet failed, BulletSystemComponent missing. SourceActor=%s BulletID=%s"),
+        UE_LOG(LogBullet, Warning, TEXT("BulletSystemBlueprintLibrary: SpawnBullet failed, BulletSystemComponent missing. SourceActor=%s BulletId=%s"),
             *GetNameSafe(SourceActor),
-            *BulletID.ToString());
+            *BulletId.ToString());
         return INDEX_NONE;
     }
 
-    return BulletComponent->SpawnBullet(BulletID, InitParams);
+    return BulletComponent->SpawnBullet(BulletId, InitParams);
 }
 
 bool UBulletSystemBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren)

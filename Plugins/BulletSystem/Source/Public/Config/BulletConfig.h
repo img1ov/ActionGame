@@ -14,7 +14,7 @@ class BULLETGAME_API UBulletConfig : public UDataAsset
     GENERATED_BODY()
 
 public:
-    // Data tables that contribute rows of FBulletDataMain. Later entries override earlier ones by BulletID.
+    // Data tables that contribute rows of FBulletDataMain. Later entries override earlier ones by BulletId.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
     TArray<TObjectPtr<UDataTable>> BulletDataTables;
 
@@ -23,7 +23,7 @@ public:
     TArray<FBulletDataMain> InlineBulletData;
 
     // Lookup a bullet row by id. RebuildRuntimeTable() will be called lazily if needed.
-    bool GetBulletData(FName BulletID, FBulletDataMain& OutData) const;
+    bool GetBulletData(FName BulletId, FBulletDataMain& OutData) const;
     // Rebuild the runtime lookup table from BulletDataTables + InlineBulletData.
     void RebuildRuntimeTable() const;
 

@@ -6,9 +6,9 @@
 #include "UObject/UnrealType.h"
 #endif
 
-bool UBulletConfig::GetBulletData(FName BulletID, FBulletDataMain& OutData) const
+bool UBulletConfig::GetBulletData(FName BulletId, FBulletDataMain& OutData) const
 {
-    if (BulletID.IsNone())
+    if (BulletId.IsNone())
     {
         return false;
     }
@@ -18,10 +18,10 @@ bool UBulletConfig::GetBulletData(FName BulletID, FBulletDataMain& OutData) cons
         RebuildRuntimeTable();
     }
 
-    if (const FBulletDataMain* Found = RuntimeTable.Find(BulletID))
+    if (const FBulletDataMain* Found = RuntimeTable.Find(BulletId))
     {
         OutData = *Found;
-        OutData.BulletID = BulletID;
+        OutData.BulletId = BulletId;
         return true;
     }
 
@@ -60,7 +60,7 @@ void UBulletConfig::RebuildRuntimeTable() const
                 continue;
             }
 
-            FName RowBulletId = Row->BulletID;
+            FName RowBulletId = Row->BulletId;
             if (RowBulletId.IsNone())
             {
                 RowBulletId = RowName;
@@ -74,7 +74,7 @@ void UBulletConfig::RebuildRuntimeTable() const
             RuntimeTable.Add(RowBulletId, *Row);
             if (FBulletDataMain* Added = RuntimeTable.Find(RowBulletId))
             {
-                Added->BulletID = RowBulletId;
+                Added->BulletId = RowBulletId;
             }
             ++AddedRowCount;
         }
@@ -82,14 +82,14 @@ void UBulletConfig::RebuildRuntimeTable() const
 
     for (const FBulletDataMain& Item : InlineBulletData)
     {
-        if (Item.BulletID.IsNone())
+        if (Item.BulletId.IsNone())
         {
             continue;
         }
-        RuntimeTable.Add(Item.BulletID, Item);
-        if (FBulletDataMain* Added = RuntimeTable.Find(Item.BulletID))
+        RuntimeTable.Add(Item.BulletId, Item);
+        if (FBulletDataMain* Added = RuntimeTable.Find(Item.BulletId))
         {
-            Added->BulletID = Item.BulletID;
+            Added->BulletId = Item.BulletId;
         }
         ++AddedRowCount;
     }

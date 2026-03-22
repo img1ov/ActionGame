@@ -28,23 +28,23 @@ void UBulletSystemComponent::SetBulletConfig(UBulletConfig* InConfig)
 	BulletConfig = InConfig;
 }
 
-int32 UBulletSystemComponent::SpawnBullet(FName BulletID, const FBulletInitParams& InitParams)
+int32 UBulletSystemComponent::SpawnBullet(FName BulletId, const FBulletInitParams& InitParams)
 {
-	return SpawnBulletInternal(BulletID, InitParams);
+	return SpawnBulletInternal(BulletId, InitParams);
 }
 
-int32 UBulletSystemComponent::SpawnBulletInternal(FName BulletID, const FBulletInitParams& InitParams)
+int32 UBulletSystemComponent::SpawnBulletInternal(FName BulletId, const FBulletInitParams& InitParams)
 {
-	if (BulletID.IsNone())
+	if (BulletId.IsNone())
 	{
 		return INDEX_NONE;
 	}
 
 	if (!BulletConfig)
 	{
-		UE_LOG(LogBullet, Warning, TEXT("BulletSystemComponent: SpawnBullet failed, BulletConfig missing. Owner=%s BulletID=%s"),
+		UE_LOG(LogBullet, Warning, TEXT("BulletSystemComponent: SpawnBullet failed, BulletConfig missing. Owner=%s BulletId=%s"),
 			*GetNameSafe(GetOwner()),
-			*BulletID.ToString());
+			*BulletId.ToString());
 		return INDEX_NONE;
 	}
 
@@ -61,11 +61,11 @@ int32 UBulletSystemComponent::SpawnBulletInternal(FName BulletID, const FBulletI
 	}
 
 	int32 InstanceId = INDEX_NONE;
-	Subsystem->GetController()->SpawnBullet(InitParams, BulletID, InstanceId, BulletConfig);
+	Subsystem->GetController()->SpawnBullet(InitParams, BulletId, InstanceId, BulletConfig);
 
 	if (InstanceId != INDEX_NONE && !InitParams.InstanceAlias.IsNone())
 	{
-		InstanceRegistry.Set(InitParams.InstanceAlias, InstanceId);
+		InstanceRegistry.AddToAliasMap(InitParams.InstanceAlias, InstanceId);
 	}
 	return InstanceId;
 }
@@ -146,7 +146,7 @@ bool UBulletSystemComponent::IsInstanceIdValid(int32 InstanceId) const
 
 int32 UBulletSystemComponent::GetInstanceIdByAlias(FName InstanceAlias) const
 {
-	const int32 InstanceId = InstanceRegistry.Get(InstanceAlias);
+	const int32 InstanceId = InstanceRegistry.GetInstanceAlias(InstanceAlias);
 	if (InstanceId == INDEX_NONE)
 	{
 		return INDEX_NONE;
@@ -164,17 +164,17 @@ int32 UBulletSystemComponent::GetInstanceIdByAlias(FName InstanceAlias) const
 
 void UBulletSystemComponent::SetInstanceIdAlias(FName InstanceAlias, int32 InstanceId)
 {
-	InstanceRegistry.Set(InstanceAlias, InstanceId);
+	InstanceRegistry.AddToAliasMap(InstanceAlias, InstanceId);
 }
 
 bool UBulletSystemComponent::RemoveInstanceAlias(FName InstanceAlias)
 {
-	return InstanceRegistry.Remove(InstanceAlias);
+	return InstanceRegistry.RemoveAlias(InstanceAlias);
 }
 
 void UBulletSystemComponent::ClearInstanceAliases()
 {
-	InstanceRegistry.Clear();
+	InstanceRegistry.ClearAliasMap();
 }
 
 bool UBulletSystemComponent::IsInstanceAliasValid(FName InstanceAlias) const

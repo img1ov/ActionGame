@@ -253,10 +253,10 @@ void UBulletController::FlushDeferredHitActorResets() const
     DeferredHitActorsReset.Reset();
 }
 
-// Resolve config by BulletID and enqueue initial actions.
-bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName BulletID, int32& OutInstanceId, const UBulletConfig* OverrideConfig) const
+// Resolve config by BulletId and enqueue initial actions.
+bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName BulletId, int32& OutInstanceId, const UBulletConfig* OverrideConfig) const
 {
-    if (BulletID.IsNone())
+    if (BulletId.IsNone())
     {
         return false;
     }
@@ -266,19 +266,19 @@ bool UBulletController::SpawnBullet(const FBulletInitParams& InitParams, FName B
 
     if (OverrideConfig)
     {
-        bFound = OverrideConfig->GetBulletData(BulletID, Data);
+        bFound = OverrideConfig->GetBulletData(BulletId, Data);
     }
 
     if (!bFound)
     {
         UE_LOG(LogBullet, Warning, TEXT("BulletController: Bullet '%s' not found (Config=%s)."),
-            *BulletID.ToString(),
+            *BulletId.ToString(),
             *GetNameSafe(OverrideConfig));
         return false;
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletID=%s Owner=%s Config=%s"),
-        *BulletID.ToString(),
+    UE_LOG(LogBullet, Verbose, TEXT("SpawnBullet: BulletId=%s Owner=%s Config=%s"),
+        *BulletId.ToString(),
         InitParams.Owner ? *InitParams.Owner->GetName() : TEXT("None"),
         *GetNameSafe(OverrideConfig));
 
@@ -324,9 +324,9 @@ bool UBulletController::SpawnBulletByDataInternal(const FBulletInitParams& InitP
         ActionRunner->RunQueuedActionsForBullet(OutInstanceId);
     }
 
-    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletID=%s Simple=%s SourceConfig=%s"),
+    UE_LOG(LogBullet, Verbose, TEXT("Bullet created: InstanceId=%d BulletId=%s Simple=%s SourceConfig=%s"),
         OutInstanceId,
-        *Data.BulletID.ToString(),
+        *Data.BulletId.ToString(),
         Info->bIsSimple ? TEXT("true") : TEXT("false"),
         *GetNameSafe(SourceConfigAsset));
     return true;
@@ -883,7 +883,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
 
     for (const FBulletDataChild& ChildData : ParentInfo.Config.Children)
     {
-        if (ChildData.ChildBulletID.IsNone() || ChildData.Count <= 0)
+        if (ChildData.ChildBulletId.IsNone() || ChildData.Count <= 0)
         {
             continue;
         }
@@ -916,7 +916,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
         // Spawn via action to preserve lifecycle ordering and avoid mutating maps mid-tick.
         FBulletActionInfo ActionInfo;
         ActionInfo.Type = EBulletActionType::SummonBullet;
-        ActionInfo.ChildBulletID = ChildData.ChildBulletID;
+        ActionInfo.ChildBulletId = ChildData.ChildBulletId;
         ActionInfo.SpawnCount = ChildData.Count;
         ActionInfo.SpreadAngle = 0.0f;
         ActionInfo.SpawnLocationOffset = ChildData.SpawnLocationOffset;
@@ -931,7 +931,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
 
 void UBulletController::SpawnChildBulletsFromLogic(
     const FBulletInfo& ParentInfo,
-    FName ChildBulletID,
+    FName ChildBulletId,
     int32 Count,
     float SpreadAngle,
     int32 InheritOwnerOverride,
@@ -941,14 +941,14 @@ void UBulletController::SpawnChildBulletsFromLogic(
     bool bSpawnLocationOffsetInSpawnSpace,
     const FRotator& SpawnRotationOffset) const
 {
-    if (ChildBulletID.IsNone())
+    if (ChildBulletId.IsNone())
     {
         return;
     }
 
     const FVector Origin = ParentInfo.MoveInfo.Location;
     const FRotator BaseRot = ParentInfo.MoveInfo.Rotation;
-    const FBulletDataChild* MatchingChild = FindChildEntry(ParentInfo, ChildBulletID);
+    const FBulletDataChild* MatchingChild = FindChildEntry(ParentInfo, ChildBulletId);
     const int32 FinalCount = (Count >= 0) ? Count : (MatchingChild ? MatchingChild->Count : 0);
     const float FinalSpread = (SpreadAngle >= 0.0f) ? SpreadAngle : 0.0f;
     if (FinalCount <= 0)
@@ -979,7 +979,7 @@ void UBulletController::SpawnChildBulletsFromLogic(
         // If the parent was spawned using an override config asset, children should resolve rows from the same asset
         // to avoid falling back to the global config subsystem (which may not have a config assigned).
         const UBulletConfig* ChildConfigOverride = ParentInfo.SourceConfigAsset ? ParentInfo.SourceConfigAsset.Get() : nullptr;
-        SpawnBullet(ChildParams, ChildBulletID, ChildId, ChildConfigOverride);
+        SpawnBullet(ChildParams, ChildBulletId, ChildId, ChildConfigOverride);
     }
 }
 
@@ -1301,16 +1301,16 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     return Params;
 }
 
-const FBulletDataChild* UBulletController::FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletID) const
+const FBulletDataChild* UBulletController::FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletId) const
 {
-    if (ChildBulletID.IsNone())
+    if (ChildBulletId.IsNone())
     {
         return nullptr;
     }
 
     for (const FBulletDataChild& Child : ParentInfo.Config.Children)
     {
-        if (Child.ChildBulletID == ChildBulletID)
+        if (Child.ChildBulletId == ChildBulletId)
         {
             return &Child;
         }

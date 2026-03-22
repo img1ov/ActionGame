@@ -18,7 +18,7 @@ class BULLETGAME_API UBulletSystemBlueprintLibrary : public UBlueprintFunctionLi
 
 public:
     UFUNCTION(BlueprintCallable, Category = "BulletSystem")
-    static int32 SpawnBullet(AActor* SourceActor, FName BulletID, const FBulletInitParams& InitParams);
+    static int32 SpawnBullet(AActor* SourceActor, FName BulletId, const FBulletInitParams& InitParams);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
     static bool DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren);

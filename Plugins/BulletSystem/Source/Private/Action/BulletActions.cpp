@@ -74,7 +74,7 @@ void UBulletActionInitBullet::Execute(UBulletController* InController, FBulletIn
     bool bHasChildren = false;
     for (const FBulletDataChild& Child : BulletInfo.Config.Children)
     {
-        if (!Child.ChildBulletID.IsNone() && Child.Count > 0)
+        if (!Child.ChildBulletId.IsNone() && Child.Count > 0)
         {
             bHasChildren = true;
             break;
@@ -116,9 +116,9 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
 #if WITH_EDITOR
     if (MoveData.bUseSpawnTransform && Owner && bSpawnTransformIsIdentity)
     {
-        UE_LOG(LogBullet, Warning, TEXT("InitMove: InstanceId=%d BulletID=%s uses SpawnTransform but it is Identity. Did you forget to set InitParams.SpawnTransform? Owner=%s"),
+        UE_LOG(LogBullet, Warning, TEXT("InitMove: InstanceId=%d BulletId=%s uses SpawnTransform but it is Identity. Did you forget to set InitParams.SpawnTransform? Owner=%s"),
             BulletInfo.InstanceId,
-            *BulletInfo.Config.BulletID.ToString(),
+            *BulletInfo.Config.BulletId.ToString(),
             *GetNameSafe(BulletInfo.InitParams.Owner));
     }
 #endif
@@ -376,12 +376,12 @@ void UBulletActionSummonBullet::Execute(UBulletController* InController, FBullet
         return;
     }
 
-    const FName ChildBulletID = ActionInfo.ChildBulletID;
+    const FName ChildBulletId = ActionInfo.ChildBulletId;
     const int32 Count = ActionInfo.SpawnCount;
     const float Spread = ActionInfo.SpreadAngle;
     InController->SpawnChildBulletsFromLogic(
         BulletInfo,
-        ChildBulletID,
+        ChildBulletId,
         Count,
         Spread,
         ActionInfo.InheritOwner,

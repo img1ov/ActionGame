@@ -16,7 +16,7 @@ class USkeletalMeshComponent;
 
 /**
  * Payload carried via GameplayEventData.OptionalObject.
- * Used by GA to read notify parameters (BulletID/Alias/Process/Destroy parameters).
+ * Used by GA to read notify parameters (BulletId/Alias/Process/Destroy parameters).
  */
 UCLASS(BlueprintType)
 class BULLETGAME_API UBulletSystemNotifyPayload : public UObject
@@ -25,7 +25,7 @@ class BULLETGAME_API UBulletSystemNotifyPayload : public UObject
 
 public:
 	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	FName BulletID = NAME_None;
+	FName BulletId = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
 	FName InstanceAlias = NAME_None;
@@ -49,13 +49,13 @@ public:
  * - Authority/Autonomous: send gameplay event to GA (GA injects payload + spawns authoritative bullet).
  */
 UCLASS(meta = (DisplayName = "Bullet Spawn"))
-class BULLETGAME_API UAN_Bullet_SpawnBullet : public UAnimNotify
+class BULLETGAME_API UAN_SpawnBullet : public UAnimNotify
 {
 	GENERATED_BODY()
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName BulletID = NAME_None;
+	FName BulletId = NAME_None;
 
 	/** Runtime alias written into InitParams.InstanceAlias (used for later process/destroy lookups). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
@@ -81,7 +81,7 @@ public:
  * Targets the bullet instance by InstanceAlias.
  */
 UCLASS(meta = (DisplayName = "Bullet Process Manual Hits"))
-class BULLETGAME_API UAN_Bullet_ProcessManualHits : public UAnimNotify
+class BULLETGAME_API UAN_ProcessManualHits : public UAnimNotify
 {
 	GENERATED_BODY()
 
@@ -106,7 +106,7 @@ public:
  * Targets the bullet instance by InstanceAlias.
  */
 UCLASS(meta = (DisplayName = "Bullet Destroy"))
-class BULLETGAME_API UAN_Bullet_DestroyBullet : public UAnimNotify
+class BULLETGAME_API UAN_DestroyBullet : public UAnimNotify
 {
 	GENERATED_BODY()
 
@@ -131,13 +131,13 @@ public:
  * If InstanceAlias is empty, a unique per-notify NotifyId will be used as the runtime alias.
  */
 UCLASS(meta = (DisplayName = "Bullet Spawn (State)"))
-class BULLETGAME_API UANS_Bullet_SpawnBullet : public UAnimNotifyState
+class BULLETGAME_API UANS_SpawnBullet : public UAnimNotifyState
 {
 	GENERATED_BODY()
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName BulletID = NAME_None;
+	FName BulletId = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName InstanceAlias = NAME_None;
@@ -175,4 +175,3 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Bullet")
 	FName NotifyId;
 };
-
