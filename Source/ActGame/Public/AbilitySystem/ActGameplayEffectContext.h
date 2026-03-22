@@ -65,7 +65,7 @@ public:
 	
 protected:
 	
-	/** Ability Source object (should implement ILyraAbilitySourceInterface). NOT replicated currently */
+	/** Ability Source object (should implement IActAbilitySourceInterface). NOT replicated currently */
 	UPROPERTY()
 	TWeakObjectPtr<const UObject> AbilitySourceObject;
 };

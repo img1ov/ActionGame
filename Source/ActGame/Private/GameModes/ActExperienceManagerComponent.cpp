@@ -107,7 +107,7 @@ void UActExperienceManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayR
 
 		if (NumExpectedPausers > 0)
 		{
-			UE_LOG(LogActExperience, Error, TEXT("Actions that have asynchronous deactivation aren't fully supported yet in Lyra experiences"));
+			UE_LOG(LogActExperience, Error, TEXT("Actions that have asynchronous deactivation aren't fully supported yet in Act experiences"));
 		}
 
 		if (NumExpectedPausers == NumObservedPausers)

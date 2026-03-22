@@ -681,6 +681,11 @@ struct FBulletInitParams
     //  1: force collision enabled
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init", meta = (ClampMin = "-1", ClampMax = "1"))
     int32 CollisionEnabledOverride = -1;
+
+    // Optional per-instance alias used for runtime lookup (e.g. AnimNotify spawn -> later process/destroy by name).
+    // This is a local runtime label and is not used by BulletSystem core simulation.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
+    FName InstanceAlias = NAME_None;
 };
 
 USTRUCT(BlueprintType)

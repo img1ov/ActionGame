@@ -11,8 +11,7 @@
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
-#include "Bullet/ActBulletComponent.h"
-#include "Component/BulletSystemComponent.h"
+#include "BulletSystemComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/ActPlayerController.h"
@@ -60,9 +59,6 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 	BulletSystemComponent = CreateDefaultSubobject<UBulletSystemComponent>(TEXT("BulletSystemComponent"));
 	// Bullet simulation is local-only; server/client both run their own BulletWorldSubsystem.
 	BulletSystemComponent->SetIsReplicated(false);
-
-	ActBulletComponent = CreateDefaultSubobject<UActBulletComponent>(TEXT("ActBulletComponent"));
-	ActBulletComponent->SetIsReplicated(false);
 
 	CameraSpringArmComponent = CreateDefaultSubobject<UActSpringArmComponent>(TEXT("CameraSpringArmComponent"));
 	CameraSpringArmComponent->SetupAttachment(GetRootComponent());

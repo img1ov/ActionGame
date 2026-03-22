@@ -22,7 +22,7 @@ public:
 	
 	UActPawnData(const FObjectInitializer& ObjectInitializer);
 
-	// Class to instantiate for this pawn (should usually derive from ALyraPawn or ALyraCharacter).
+	// Class to instantiate for this pawn (should usually derive from AActPawn or AActCharacter).
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Pawn")
 	TSubclassOf<APawn> PawnClass;
 

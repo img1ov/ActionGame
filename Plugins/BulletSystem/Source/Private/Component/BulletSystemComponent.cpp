@@ -1,11 +1,13 @@
 // BulletSystem: BulletSystemComponent.cpp
-#include "Component/BulletSystemComponent.h"
+#include "BulletSystemComponent.h"
 
 #include "BulletLogChannels.h"
 #include "BulletSystemTypes.h"
 #include "Config/BulletConfig.h"
 #include "Controller/BulletController.h"
 #include "Controller/BulletWorldSubsystem.h"
+#include "Model/BulletModel.h"
+#include "Model/BulletInfo.h"
 
 #include "Engine/World.h"
 
@@ -24,11 +26,6 @@ void UBulletSystemComponent::SetBulletConfig(UBulletConfig* InConfig)
 	}
 
 	BulletConfig = InConfig;
-
-	if (BulletConfig)
-	{
-		BulletConfig->RebuildRuntimeTable();
-	}
 }
 
 int32 UBulletSystemComponent::SpawnBullet(FName BulletID, const FBulletInitParams& InitParams)
@@ -65,6 +62,11 @@ int32 UBulletSystemComponent::SpawnBulletInternal(FName BulletID, const FBulletI
 
 	int32 InstanceId = INDEX_NONE;
 	Subsystem->GetController()->SpawnBullet(InitParams, BulletID, InstanceId, BulletConfig);
+
+	if (InstanceId != INDEX_NONE && !InitParams.InstanceAlias.IsNone())
+	{
+		InstanceRegistry.Set(InitParams.InstanceAlias, InstanceId);
+	}
 	return InstanceId;
 }
 
@@ -111,4 +113,71 @@ int32 UBulletSystemComponent::ProcessManualHitsInternal(int32 InstanceId, bool b
 	}
 
 	return Subsystem->GetController()->ProcessManualHits(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
+}
+
+bool UBulletSystemComponent::IsInstanceIdValid(int32 InstanceId) const
+{
+	if (InstanceId == INDEX_NONE)
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	UBulletWorldSubsystem* Subsystem = World->GetSubsystem<UBulletWorldSubsystem>();
+	if (!Subsystem || !Subsystem->GetController())
+	{
+		return false;
+	}
+
+	UBulletModel* Model = Subsystem->GetController()->GetModel();
+	if (!Model)
+	{
+		return false;
+	}
+
+	const FBulletInfo* Info = Model->GetBullet(InstanceId);
+	return Info != nullptr && !Info->bNeedDestroy;
+}
+
+int32 UBulletSystemComponent::GetInstanceIdByAlias(FName InstanceAlias) const
+{
+	const int32 InstanceId = InstanceRegistry.Get(InstanceAlias);
+	if (InstanceId == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+
+	if (!IsInstanceIdValid(InstanceId))
+	{
+		// Lazy prune to avoid stale alias accumulation (e.g. bullet lifetime expiry).
+		InstanceRegistry.InstanceAliasMap.Remove(InstanceAlias);
+		return INDEX_NONE;
+	}
+
+	return InstanceId;
+}
+
+void UBulletSystemComponent::SetInstanceIdAlias(FName InstanceAlias, int32 InstanceId)
+{
+	InstanceRegistry.Set(InstanceAlias, InstanceId);
+}
+
+bool UBulletSystemComponent::RemoveInstanceAlias(FName InstanceAlias)
+{
+	return InstanceRegistry.Remove(InstanceAlias);
+}
+
+void UBulletSystemComponent::ClearInstanceAliases()
+{
+	InstanceRegistry.Clear();
+}
+
+bool UBulletSystemComponent::IsInstanceAliasValid(FName InstanceAlias) const
+{
+	return GetInstanceIdByAlias(InstanceAlias) != INDEX_NONE;
 }

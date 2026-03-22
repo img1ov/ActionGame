@@ -54,11 +54,11 @@ public:
 	virtual void PostInitializeComponents() override;
 	//~End of AActor interface
 	
-	//~ILyraTeamAgentInterface interface
+	//~IActTeamAgentInterface interface
 	UE_API virtual void SetGenericTeamId(const FGenericTeamId& NewTeamID) override;
 	UE_API virtual FGenericTeamId GetGenericTeamId() const override;
 	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
-	//~End of ILyraTeamAgentInterface interface
+	//~End of IActTeamAgentInterface interface
 
 protected:
 	

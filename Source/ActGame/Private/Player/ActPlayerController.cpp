@@ -103,7 +103,7 @@ void AActPlayerController::OnRep_PlayerState()
 	// When we're a client connected to a remote server, the player controller may replicate later than the PlayerState and AbilitySystemComponent.
 	// However, TryActivateAbilitiesOnSpawn depends on the player controller being replicated in order to check whether on-spawn abilities should
 	// execute locally. Therefore once the PlayerController exists and has resolved the PlayerState, try once again to activate on-spawn abilities.
-	// On other net modes the PlayerController will never replicate late, so LyraASC's own TryActivateAbilitiesOnSpawn calls will succeed. The handling 
+	// On other net modes the PlayerController will never replicate late, so ActASC's own TryActivateAbilitiesOnSpawn calls will succeed. The handling 
 	// here is only for when the PlayerState and ASC replicated before the PC and incorrectly thought the abilities were not for the local player.
 	if (GetWorld()->IsNetMode(NM_Client))
 	{

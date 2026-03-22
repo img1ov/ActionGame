@@ -160,7 +160,7 @@ bool AActGameMode::TryDedicatedServerLogin()
 		UCommonUserSubsystem* UserSubsystem = GameInstance->GetSubsystem<UCommonUserSubsystem>();
 
 		// Dedicated servers may need to do an online login
-		UserSubsystem->OnUserInitializeComplete.AddDynamic(this, &ALyraGameMode::OnUserInitializedForDedicatedServer);
+		UserSubsystem->OnUserInitializeComplete.AddDynamic(this, &AActGameMode::OnUserInitializedForDedicatedServer);
 
 		// There are no local users on dedicated server, but index 0 means the default platform user which is handled by the online login code
 		if (!UserSubsystem->TryToLoginForOnlinePlay(0))

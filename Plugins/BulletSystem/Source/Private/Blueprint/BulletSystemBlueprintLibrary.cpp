@@ -2,10 +2,10 @@
 // Blueprint-facing helpers.
 #include "Blueprint/BulletSystemBlueprintLibrary.h"
 #include "BulletLogChannels.h"
-#include "Component/BulletSystemComponent.h"
+#include "BulletSystemComponent.h"
 #include "Controller/BulletWorldSubsystem.h"
 #include "Controller/BulletController.h"
-#include "Interface/BulletSystemInterface.h"
+#include "BulletSystemInterface.h"
 #include "Model/BulletModel.h"
 #include "Engine/World.h"
 

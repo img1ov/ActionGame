@@ -10,10 +10,10 @@
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
-#include "Component/BulletSystemComponent.h"
 #include "Components/GameFrameworkComponentManager.h"
 #include "Input/ActInputComponent.h"
 #include "Input/ActInputCommandConfig.h"
+#include "BulletSystemComponent.h"
 #include "Logging/MessageLog.h"
 #include "Misc/UObjectToken.h"
 #include "Player/ActLocalPlayer.h"
@@ -163,14 +163,16 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 			// The player state holds the persistent data for this player (state that persists across deaths and multiple pawns).
 			// The ability system component and attribute sets live on the player state.
 			PawnExtComp->InitializeAbilitySystem(ActPS->GetActAbilitySystemComponent(), ActPS);
+		}
 
-			// Forward PawnData bullet config into the pawn's BulletSystemComponent (local-only, non-replicated).
-			if (PawnData && PawnData->BulletConfig && Pawn)
+		// Forward PawnData bullet config into the pawn's BulletSystemComponent (local-only, non-replicated).
+		// This keeps PawnExtensionComponent clean (system-level), while still ensuring each machine can initialize its
+		// local BulletWorldSubsystem consistently (authority, autonomous, simulated proxies).
+		if (PawnData && PawnData->BulletConfig)
+		{
+			if (UBulletSystemComponent* BulletComp = Pawn->FindComponentByClass<UBulletSystemComponent>())
 			{
-				if (UBulletSystemComponent* BulletComp = Pawn->FindComponentByClass<UBulletSystemComponent>())
-				{
-					BulletComp->SetBulletConfig(PawnData->BulletConfig);
-				}
+				BulletComp->SetBulletConfig(PawnData->BulletConfig);
 			}
 		}
 

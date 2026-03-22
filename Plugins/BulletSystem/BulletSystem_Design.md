@@ -561,7 +561,7 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 ---
 
-## 18. 联机与 AnimNotify 集成（ActGame）
+## 18. 联机与 AnimNotify 集成（BulletSystem）
 
 本插件的 BulletSystem 核心（Controller/Model/Action/System）不依赖网络复制；联机下推荐采用如下分工：
 
@@ -569,22 +569,22 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - **自主代理（AutonomousProxy）**：和服务端一致跑 GA（LocalPredicted / Server），在 GA 中注入 Payload（SetByCaller 等）后再 Spawn 子弹。
 - **模拟端（SimulatedProxy）**：不执行 GA，但仍会播放蒙太奇并触发 AnimNotify。模拟端应 **直接本地 Spawn 子弹** 用于表现，且建议开启碰撞用于驱动击中特效等视觉反馈；但伤害/环境交互必须保持权威（服务端执行）。
 
-### 18.1 SlotIndex 运行时句柄
+### 18.1 InstanceAlias 运行时句柄
 
-AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 ActGame 引入了 **SlotIndex**：
+AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 BulletSystem 引入了 **InstanceAlias**：
 
-- `AN_SpawnBullet`：配置 `SlotIndex`，Spawn 后把返回的 `InstanceId` 存入 Slot。
-- `AN_ProcessManualHits` / `AN_DestroyBullet`：用同一个 `SlotIndex` 取回 `InstanceId` 并转发到插件的 `ProcessManualHits/DestroyBullet`。
+- `AN_Bullet_SpawnBullet`：写入 `InitParams.InstanceAlias`（推荐显式配置）。如果未配置，则默认用 `BulletID` 作为别名。Spawn 后由 `UBulletSystemComponent` 的 `FBulletInstanceRegistry` 将 `Alias -> InstanceId` 写入运行时表。
+- `AN_Bullet_ProcessManualHits` / `AN_Bullet_DestroyBullet`：用同一个 `InstanceAlias` 解析到 `InstanceId`，再调用 `ProcessManualHits/DestroyBullet`。
 
-### 18.2 ANS_SpawnBullet（窗口型）
+### 18.2 ANS_Bullet_SpawnBullet（窗口型）
 
-`ANS_SpawnBullet` 用 NotifyState 自带的 `NotifyId`（编辑器内每个 Notify 实例生成唯一 ID）做映射，避免手动配置 SlotIndex：
+`ANS_Bullet_SpawnBullet` 用 NotifyState 自带的 `NotifyId`（编辑器内每个 Notify 实例生成唯一 ID）作为默认别名（当未配置 `InstanceAlias` 时），避免手动管理句柄：
 
 - Begin：记录 `NotifyId -> InstanceId`
 - End：根据 `NotifyId` Destroy
 
-注意：Authority/Autonomous 侧 End 阶段同样需要通过 GameplayEvent（`EndEventTag`）通知 GA 执行 Destroy，
-因为 NotifyState 本身不持有权威的 `InstanceId`。
+注意：Authority/Autonomous 侧如果配置了 `EndEventTag`，End 阶段会通过 GameplayEvent 通知 GA 执行 Destroy；
+未配置时将直接按 `InstanceAlias` 在本地 Destroy（适合非 GAS 场景）。
 
 ### 18.3 权威守门（环境交互）
 

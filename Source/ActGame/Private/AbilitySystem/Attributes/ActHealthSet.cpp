@@ -14,7 +14,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_Damage, "Gameplay.Damage");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_DamageImmunity, "Gameplay.DamageImmunity");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_DamageSelfDestruct, "Gameplay.Damage.SelfDestruct");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_FellOutOfWorld, "Gameplay.Damage.FellOutOfWorld");
-UE_DEFINE_GAMEPLAY_TAG(TAG_Act_Damage_Message, "Lyra.Damage.Message");
+UE_DEFINE_GAMEPLAY_TAG(TAG_Act_Damage_Message, "Act.Damage.Message");
 
 UActHealthSet::UActHealthSet()
 	: Health(100.0f)
