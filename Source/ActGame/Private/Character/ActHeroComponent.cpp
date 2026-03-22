@@ -164,10 +164,10 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 			// The ability system component and attribute sets live on the player state.
 			PawnExtComp->InitializeAbilitySystem(ActPS->GetActAbilitySystemComponent(), ActPS);
 
-			// Forward PawnData bullet config into the BulletSystemComponent (mirrors AbilitySet init flow).
-			if (PawnData && PawnData->BulletConfig)
+			// Forward PawnData bullet config into the pawn's BulletSystemComponent (local-only, non-replicated).
+			if (PawnData && PawnData->BulletConfig && Pawn)
 			{
-				if (UBulletSystemComponent* BulletComp = ActPS->FindComponentByClass<UBulletSystemComponent>())
+				if (UBulletSystemComponent* BulletComp = Pawn->FindComponentByClass<UBulletSystemComponent>())
 				{
 					BulletComp->SetBulletConfig(PawnData->BulletConfig);
 				}

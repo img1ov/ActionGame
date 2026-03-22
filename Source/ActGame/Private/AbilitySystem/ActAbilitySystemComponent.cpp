@@ -8,8 +8,6 @@
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
 #include "Abilities/GameplayAbility.h"
 #include "Animation/ActAnimInstance.h"
-#include "Blueprint/BulletBlueprintLibrary.h"
-#include "Player/ActPlayerState.h"
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_AbilityInputBlocked, "Gameplay.AbilityInputBlocked");
 
@@ -482,19 +480,6 @@ void UActAbilitySystemComponent::K2_AbilityInputTagReleased(const FGameplayTag I
 	AbilityInputTagReleased(InputTag);
 }
 
-int32 UActAbilitySystemComponent::SpawnBullet(FName BulletID, const FBulletInitParams& InitParams) const
-{
-	const AActPlayerState* ActPS = Cast<AActPlayerState>(GetOwnerActor());
-	if (!ActPS) return  INDEX_NONE;
-
-	return UBulletBlueprintLibrary::SpawnBullet(const_cast<AActPlayerState*>(ActPS), BulletID, InitParams);
-}
-
-int32 UActAbilitySystemComponent::K2_SpawnBullet(FName BulletID, const FBulletInitParams& InitParams)
-{
-	return SpawnBullet(BulletID, InitParams);
-}
-
 
 void UActAbilitySystemComponent::TryActivateAbilitiesOnSpawn()
 {
@@ -732,6 +717,7 @@ void UActAbilitySystemComponent::OnRep_ActivateAbilities()
 
 	RebuildAbilityIdCache();
 }
+
 
 void UActAbilitySystemComponent::AbilitySpecInputPressed(FGameplayAbilitySpec& Spec)
 {

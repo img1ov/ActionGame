@@ -1,4 +1,4 @@
-﻿# BulletSystem 模块设计详解
+﻿﻿# BulletSystem 模块设计详解
 
 > 面向实现与维护的工程说明，聚焦架构分层、运行流程、扩展点与性能策略。
 
@@ -558,3 +558,34 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - 红框但没有 OnHit：检查 `Base.HitTrigger` 是否为 Manual
 - OnHit 没触发且 bullet 似乎是 simple：检查 `Execution.LogicDataList` 是否真的写到了该 bullet 行
 - LogicData 不生效：检查软引用资产是否可加载、`ControllerClass` 是否设置、是否被 cook
+
+---
+
+## 18. 联机与 AnimNotify 集成（ActGame）
+
+本插件的 BulletSystem 核心（Controller/Model/Action/System）不依赖网络复制；联机下推荐采用如下分工：
+
+- **服务端（Authority）**：运行子弹完整逻辑链路，命中时通过 GAS 结算伤害（GE），并以 GE/Cue 负责“权威结果”的同步。
+- **自主代理（AutonomousProxy）**：和服务端一致跑 GA（LocalPredicted / Server），在 GA 中注入 Payload（SetByCaller 等）后再 Spawn 子弹。
+- **模拟端（SimulatedProxy）**：不执行 GA，但仍会播放蒙太奇并触发 AnimNotify。模拟端应 **直接本地 Spawn 子弹** 用于表现，且建议开启碰撞用于驱动击中特效等视觉反馈；但伤害/环境交互必须保持权威（服务端执行）。
+
+### 18.1 SlotIndex 运行时句柄
+
+AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 ActGame 引入了 **SlotIndex**：
+
+- `AN_SpawnBullet`：配置 `SlotIndex`，Spawn 后把返回的 `InstanceId` 存入 Slot。
+- `AN_ProcessManualHits` / `AN_DestroyBullet`：用同一个 `SlotIndex` 取回 `InstanceId` 并转发到插件的 `ProcessManualHits/DestroyBullet`。
+
+### 18.2 ANS_SpawnBullet（窗口型）
+
+`ANS_SpawnBullet` 用 NotifyState 自带的 `NotifyId`（编辑器内每个 Notify 实例生成唯一 ID）做映射，避免手动配置 SlotIndex：
+
+- Begin：记录 `NotifyId -> InstanceId`
+- End：根据 `NotifyId` Destroy
+
+注意：Authority/Autonomous 侧 End 阶段同样需要通过 GameplayEvent（`EndEventTag`）通知 GA 执行 Destroy，
+因为 NotifyState 本身不持有权威的 `InstanceId`。
+
+### 18.3 权威守门（环境交互）
+
+`Interact.bAffectEnvironment` 代表会影响环境/世界状态的交互回调。为了避免客户端双跑，插件侧已在命中处理里加了守门：客户端跳过该回调，仅服务端执行。

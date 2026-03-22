@@ -996,6 +996,23 @@ void UBulletController::SummonEntityFromConfig(const FBulletInfo& ParentInfo) co
         return;
     }
 
+    // If the summon actor is replicated, only spawn it on authority to avoid client-side duplicates
+    // (client local spawn + server replicated spawn).
+    if (UWorld* WorldPtr = World.Get())
+    {
+        if (WorldPtr->IsNetMode(NM_Client))
+        {
+            const AActor* CDO = Cast<AActor>(Summon.SummonClass->GetDefaultObject());
+            if (CDO && CDO->GetIsReplicated())
+            {
+                UE_LOG(LogBullet, Verbose, TEXT("SummonEntityFromConfig: Skip replicated SummonClass on client. InstanceId=%d Class=%s"),
+                    ParentInfo.InstanceId,
+                    *GetNameSafe(Summon.SummonClass));
+                return;
+            }
+        }
+    }
+
     const FTransform SpawnTransform = Summon.SummonOffset * FTransform(ParentInfo.MoveInfo.Rotation, ParentInfo.MoveInfo.Location);
     AActor* SummonedActor = World->SpawnActor<AActor>(Summon.SummonClass, SpawnTransform);
     if (SummonedActor && Summon.bAttachToOwner && ParentInfo.InitParams.Owner)
@@ -1093,10 +1110,19 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
 
     if (Info.Config.Interact.bEnableInteract && Info.Config.Interact.bAffectEnvironment && HitActor)
     {
-        if (HitActor->GetClass()->ImplementsInterface(UBulletInteractInterface::StaticClass()))
+        // Environment-affecting interaction must be authoritative to avoid client double-run.
+        // (Cosmetic-only interactions should use a separate config flag/path.)
+        if (UWorld* WorldPtr = GetWorld())
         {
-            IBulletInteractInterface::Execute_OnBulletInteract(HitActor, Info, Hit);
-            UE_LOG(LogBullet, Verbose, TEXT("SceneInteract: InstanceId=%d Actor=%s"), Info.InstanceId, *HitActor->GetName());
+            if (WorldPtr->IsNetMode(NM_Client))
+            {
+                // Client: skip.
+            }
+            else if (HitActor->GetClass()->ImplementsInterface(UBulletInteractInterface::StaticClass()))
+            {
+                IBulletInteractInterface::Execute_OnBulletInteract(HitActor, Info, Hit);
+                UE_LOG(LogBullet, Verbose, TEXT("SceneInteract: InstanceId=%d Actor=%s"), Info.InstanceId, *HitActor->GetName());
+            }
         }
     }
 

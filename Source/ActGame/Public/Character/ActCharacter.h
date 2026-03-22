@@ -22,6 +22,7 @@ class UActHealthComponent;
 class UActPawnExtensionComponent;
 class UActAbilitySystemComponent;
 class UBulletSystemComponent;
+class UActBulletComponent;
 struct FFrame;
 struct FGameplayTag;
 struct FGameplayTagContainer;
@@ -189,6 +190,12 @@ private:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UActPawnExtensionComponent> PawnExtComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBulletSystemComponent> BulletSystemComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UActBulletComponent> ActBulletComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UActHealthComponent> HealthComponent;

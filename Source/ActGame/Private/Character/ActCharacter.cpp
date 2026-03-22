@@ -11,6 +11,7 @@
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
+#include "Bullet/ActBulletComponent.h"
 #include "Component/BulletSystemComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -55,6 +56,13 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 	HealthComponent = CreateDefaultSubobject<UActHealthComponent>(TEXT("HealthComponent"));
 	HealthComponent->OnDeathStarted.AddDynamic(this, &ThisClass::OnDeathStarted);
 	HealthComponent->OnDeathFinished.AddDynamic(this, &ThisClass::OnDeathFinished);
+
+	BulletSystemComponent = CreateDefaultSubobject<UBulletSystemComponent>(TEXT("BulletSystemComponent"));
+	// Bullet simulation is local-only; server/client both run their own BulletWorldSubsystem.
+	BulletSystemComponent->SetIsReplicated(false);
+
+	ActBulletComponent = CreateDefaultSubobject<UActBulletComponent>(TEXT("ActBulletComponent"));
+	ActBulletComponent->SetIsReplicated(false);
 
 	CameraSpringArmComponent = CreateDefaultSubobject<UActSpringArmComponent>(TEXT("CameraSpringArmComponent"));
 	CameraSpringArmComponent->SetupAttachment(GetRootComponent());
@@ -108,16 +116,7 @@ UAbilitySystemComponent* AActCharacter::GetAbilitySystemComponent() const
 
 UBulletSystemComponent* AActCharacter::GetBulletSystemComponent_Implementation() const
 {
-	if (AActPlayerState* ActPS = GetActPlayerState())
-	{
-		if (ActPS->GetClass()->ImplementsInterface(UBulletSystemInterface::StaticClass()))
-		{
-			return IBulletSystemInterface::Execute_GetBulletSystemComponent(ActPS);
-		}
-		return ActPS->FindComponentByClass<UBulletSystemComponent>();
-	}
-
-	return FindComponentByClass<UBulletSystemComponent>();
+	return BulletSystemComponent;
 }
 
 void AActCharacter::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const

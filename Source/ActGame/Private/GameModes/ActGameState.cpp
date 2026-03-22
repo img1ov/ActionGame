@@ -4,7 +4,6 @@
 #include "GameModes/ActGameState.h"
 
 #include "AbilitySystem/ActAbilitySystemComponent.h"
-#include "Component/BulletSystemComponent.h"
 #include "GameModes/ActExperienceManagerComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -19,9 +18,6 @@ AActGameState::AActGameState(const FObjectInitializer& ObjectInitializer)
 	AbilitySystemComponent = ObjectInitializer.CreateDefaultSubobject<UActAbilitySystemComponent>(this, TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
-
-	BulletSystemComponent = ObjectInitializer.CreateDefaultSubobject<UBulletSystemComponent>(this, TEXT("BulletSystemComponent"));
-	BulletSystemComponent->SetIsReplicated(true);
 
 	ExperienceManagerComponent = CreateDefaultSubobject<UActExperienceManagerComponent>(TEXT("ExperienceManagerComponent"));
 
@@ -53,9 +49,4 @@ float AActGameState::GetServerFPS() const
 UAbilitySystemComponent* AActGameState::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
-}
-
-UBulletSystemComponent* AActGameState::GetBulletSystemComponent_Implementation() const
-{
-	return BulletSystemComponent;
 }
