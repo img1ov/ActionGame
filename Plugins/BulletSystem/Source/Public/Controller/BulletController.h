@@ -57,7 +57,7 @@ public:
     // Queue a lifecycle action for deterministic execution order.
     void EnqueueAction(int32 InstanceId, const FBulletActionInfo& ActionInfo) const;
     // Request bullet destruction through the action pipeline.
-    void RequestDestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const;
+    void RequestDestroyBullet(int32 InstanceId) const;
     // Mark a bullet for destruction at end of tick.
     void MarkBulletForDestroy(int32 InstanceId) const;
 
@@ -104,6 +104,7 @@ public:
 
 private:
     bool SpawnBulletByDataInternal(const FBulletInitParams& InitParams, const FBulletDataMain& Data, int32& OutInstanceId, UBulletConfig* SourceConfigAsset) const;
+    void RequestDestroyBulletInternal(int32 InstanceId, bool bSummonChildrenOnDestroy) const;
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
     // Frame-end: clear hit caches requested by gameplay (keeps hit info valid for the current frame's logic chain).

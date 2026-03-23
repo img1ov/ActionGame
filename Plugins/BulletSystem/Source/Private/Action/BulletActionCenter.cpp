@@ -90,8 +90,6 @@ UClass* UBulletActionCenter::GetActionClass(EBulletActionType ActionType) const
         return UBulletActionSummonBullet::StaticClass();
     case EBulletActionType::SummonEntity:
         return UBulletActionSummonEntity::StaticClass();
-    case EBulletActionType::DestroyBullet:
-        return UBulletActionDestroyBullet::StaticClass();
     case EBulletActionType::DelayDestroyBullet:
         return UBulletActionDelayDestroyBullet::StaticClass();
     case EBulletActionType::SceneInteract:

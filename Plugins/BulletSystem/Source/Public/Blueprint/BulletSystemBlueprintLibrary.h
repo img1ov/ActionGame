@@ -20,8 +20,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "BulletSystem")
     static int32 SpawnBullet(AActor* SourceActor, FName BulletId, const FBulletInitParams& InitParams);
 
+    // Resolve a runtime bullet instance by InstanceKey from the owner's BulletSystemComponent registry.
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|InstanceRegistry")
+    static int32 GetInstanceIdByKey(AActor* SourceActor, FName InstanceKey);
+
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren);
+    static bool DestroyBullet(const UObject* WorldContextObject, int32 InstanceId);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
     static bool IsBulletValid(const UObject* WorldContextObject, int32 InstanceId);
@@ -70,13 +74,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "BulletSystem|Payload")
     static void ClearInitParamsPayload(UPARAM(ref) FBulletInitParams& InitParams);
 
+    // Pure convenience: replace InitParams.Payload and return the updated struct (useful for Blueprint chaining).
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
+    static FBulletInitParams SetBulletPayload(FBulletInitParams InitParams, const FBulletPayload& Payload);
+
     // InitParams helpers.
-    UFUNCTION(BlueprintCallable, Category = "BulletSystem|InitParams")
-    static void SetInitParamsCollisionEnabledOverride(UPARAM(ref) FBulletInitParams& InitParams, bool bCollisionEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "BulletSystem|InitParams")
-    static void ClearInitParamsCollisionEnabledOverride(UPARAM(ref) FBulletInitParams& InitParams);
-
     // Read-side: runtime access from BulletInfo.
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
     static bool GetPayloadSetByCallerMagnitudeByName(const FBulletInfo& BulletInfo, FName DataName, float& OutMagnitude);

@@ -350,95 +350,78 @@ void UBulletController::EnqueueAction(int32 InstanceId, const FBulletActionInfo&
     ActionRunner->EnqueueAction(InstanceId, ActionInfo);
 }
 
-void UBulletController::RequestDestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const
+void UBulletController::RequestDestroyBullet(int32 InstanceId) const
 {
-    if (Reason == EBulletDestroyReason::Immediate)
+    RequestDestroyBulletInternal(InstanceId, /*bSummonChildrenOnDestroy*/ true);
+}
+
+void UBulletController::RequestDestroyBulletInternal(int32 InstanceId, bool bSummonChildrenOnDestroy) const
+{
+    if (!Model)
     {
-        if (!Model)
-        {
-            return;
-        }
-
-        FBulletInfo* BulletInfo = Model->GetBullet(InstanceId);
-        if (!BulletInfo || BulletInfo->bNeedDestroy)
-        {
-            return;
-        }
-
-#if WITH_EDITOR
-        if (bEnableDebugDraw)
-        {
-            if (UWorld* WorldPtr = GetWorld())
-            {
-                ULineBatchComponent* LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
-                if (!LineBatcher)
-                {
-                    LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
-                }
-                if (LineBatcher)
-                {
-                    const uint32 BatchId = 0xB011E700u ^ static_cast<uint32>(InstanceId);
-                    LineBatcher->ClearBatch(BatchId);
-                }
-            }
-        }
-#endif
-
-        BulletInfo->DestroyWorldTime = GetWorldTimeSeconds();
-        BulletInfo->bNeedDestroy = true;
-        BulletInfo->CollisionInfo.bCollisionEnabled = false;
-        BulletInfo->CollisionInfo.OverlapActors.Reset();
-        BulletInfo->CollisionInfo.HitActors.Reset();
-        BulletInfo->PendingDestroyDelay = 0.0f;
-
-        if (BulletInfo->Entity && BulletInfo->Entity->GetLogicComponent())
-        {
-            if (!BulletInfo->bIsSimple)
-            {
-                BulletInfo->Entity->GetLogicComponent()->HandleOnDestroy(*BulletInfo, Reason);
-            }
-        }
-
-        if (bSpawnChildren)
-        {
-            RequestSummonChildren(*BulletInfo, EBulletChildSpawnTrigger::OnDestroy);
-        }
-
-        if (BulletInfo->EffectInfo.NiagaraComponent)
-        {
-            if (UNiagaraComponent* NiagaraComponent = BulletInfo->EffectInfo.NiagaraComponent.Get())
-            {
-                NiagaraComponent->Deactivate();
-            }
-            BulletInfo->EffectInfo.NiagaraComponent = nullptr;
-        }
-
-        MarkBulletForDestroy(InstanceId);
-
-        UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBulletImmediate: InstanceId=%d SpawnChildren=%s"),
-            InstanceId,
-            bSpawnChildren ? TEXT("true") : TEXT("false"));
         return;
     }
 
-    FBulletActionInfo Info;
-    Info.Type = EBulletActionType::DestroyBullet;
-    Info.DestroyReason = Reason;
-    Info.bSpawnChildren = bSpawnChildren;
-    EnqueueAction(InstanceId, Info);
-
-    if (Model)
+    FBulletInfo* BulletInfo = Model->GetBullet(InstanceId);
+    if (!BulletInfo || BulletInfo->bNeedDestroy)
     {
-        if (FBulletInfo* BulletInfo = Model->GetBullet(InstanceId))
+        return;
+    }
+
+#if WITH_EDITOR
+    if (bEnableDebugDraw)
+    {
+        if (UWorld* WorldPtr = GetWorld())
         {
-            if (BulletInfo->DestroyWorldTime < 0.0f)
+            ULineBatchComponent* LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
+            if (!LineBatcher)
             {
-                BulletInfo->DestroyWorldTime = GetWorldTimeSeconds();
+                LineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+            }
+            if (LineBatcher)
+            {
+                const uint32 BatchId = 0xB011E700u ^ static_cast<uint32>(InstanceId);
+                LineBatcher->ClearBatch(BatchId);
             }
         }
     }
+#endif
 
-    UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBullet: InstanceId=%d Reason=%d SpawnChildren=%s"), InstanceId, static_cast<int32>(Reason), bSpawnChildren ? TEXT("true") : TEXT("false"));
+    BulletInfo->DestroyWorldTime = GetWorldTimeSeconds();
+    BulletInfo->bNeedDestroy = true;
+    BulletInfo->CollisionInfo.bCollisionEnabled = false;
+    BulletInfo->CollisionInfo.OverlapActors.Reset();
+    BulletInfo->CollisionInfo.HitActors.Reset();
+    BulletInfo->PendingDestroyDelay = 0.0f;
+
+    if (BulletInfo->Entity && BulletInfo->Entity->GetLogicComponent())
+    {
+        if (!BulletInfo->bIsSimple)
+        {
+            BulletInfo->Entity->GetLogicComponent()->HandleOnDestroy(*BulletInfo);
+        }
+    }
+
+    // Child spawning is governed by bullet config (bSpawnOnDestroy), not by the destroy request.
+    if (bSummonChildrenOnDestroy)
+    {
+        RequestSummonChildren(*BulletInfo, EBulletChildSpawnTrigger::OnDestroy);
+    }
+
+    if (BulletInfo->EffectInfo.NiagaraComponent)
+    {
+        if (UNiagaraComponent* NiagaraComponent = BulletInfo->EffectInfo.NiagaraComponent.Get())
+        {
+            NiagaraComponent->Deactivate();
+        }
+        BulletInfo->EffectInfo.NiagaraComponent = nullptr;
+    }
+
+    MarkBulletForDestroy(InstanceId);
+
+    UE_LOG(LogBullet, Verbose, TEXT("RequestDestroyBullet: InstanceId=%d SummonChildren=%s"),
+        InstanceId,
+        bSummonChildrenOnDestroy ? TEXT("true") : TEXT("false"));
 }
 
 void UBulletController::MarkBulletForDestroy(int32 InstanceId) const
@@ -1148,7 +1131,7 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
         if (bDestroyOnHit)
         {
             UE_LOG(LogBullet, Verbose, TEXT("Hit response: Destroy (InstanceId=%d)"), Info.InstanceId);
-            RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
+            RequestDestroyBullet(Info.InstanceId);
             return true;
         }
         break;
@@ -1178,7 +1161,7 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
         if (bDestroyOnHit)
         {
             UE_LOG(LogBullet, Verbose, TEXT("Hit response: Support->Destroy (InstanceId=%d)"), Info.InstanceId);
-            RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
+            RequestDestroyBullet(Info.InstanceId);
             return true;
         }
         break;
@@ -1190,7 +1173,7 @@ bool UBulletController::HandleHitResult(FBulletInfo& Info, AActor* HitActor, con
     if (bHitLimitReached && !Info.bNeedDestroy)
     {
         UE_LOG(LogBullet, Verbose, TEXT("Hit limit reached: Destroy (InstanceId=%d)"), Info.InstanceId);
-        RequestDestroyBullet(Info.InstanceId, EBulletDestroyReason::Hit, true);
+        RequestDestroyBullet(Info.InstanceId);
         return true;
     }
 
@@ -1239,7 +1222,8 @@ void UBulletController::FlushDestroyedBullets() const
                     continue;
                 }
 
-                RequestDestroyBullet(ChildInstanceId, EBulletDestroyReason::ParentDestroyed, false);
+                // Parent-destruction propagation: cleanup children without triggering further child spawning.
+                RequestDestroyBulletInternal(ChildInstanceId, /*bSummonChildrenOnDestroy*/ false);
             }
         }
 
@@ -1290,9 +1274,6 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
     Params.TargetActor = bInheritTarget ? ParentInfo.InitParams.TargetActor : nullptr;
     Params.TargetLocation = ParentInfo.InitParams.TargetLocation;
     Params.SpawnTransform = ChildTransform;
-    Params.ContextId = ParentInfo.InitParams.ContextId;
-    Params.AbilityId = ParentInfo.InitParams.AbilityId;
-    Params.CollisionEnabledOverride = ParentInfo.InitParams.CollisionEnabledOverride;
     if (bInheritPayload)
     {
         Params.Payload = ParentInfo.InitParams.Payload;

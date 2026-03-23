@@ -98,15 +98,6 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletActionDestroyBullet : public UBulletActionBase
-{
-    GENERATED_BODY()
-
-public:
-    virtual void Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo) override;
-};
-
-UCLASS()
 class BULLETGAME_API UBulletActionDelayDestroyBullet : public UBulletActionBase
 {
     GENERATED_BODY()

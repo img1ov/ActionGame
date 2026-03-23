@@ -99,6 +99,13 @@ void UBulletConfig::RebuildRuntimeTable() const
 }
 
 #if WITH_EDITOR
+void UBulletConfig::PostLoad()
+{
+    Super::PostLoad();
+
+    BindDataTableChangedDelegates();
+}
+
 void UBulletConfig::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -113,6 +120,55 @@ void UBulletConfig::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
             Item.ApplyConfigProfileDefaults();
         }
         bRuntimeTableDirty = true;
+
+        // BulletDataTables may have changed: rebind the change delegates so editing the table rows invalidates cache.
+        if (PropertyName == GET_MEMBER_NAME_CHECKED(UBulletConfig, BulletDataTables))
+        {
+            BindDataTableChangedDelegates();
+        }
     }
+}
+
+void UBulletConfig::BeginDestroy()
+{
+    UnbindDataTableChangedDelegates();
+    Super::BeginDestroy();
+}
+
+void UBulletConfig::BindDataTableChangedDelegates()
+{
+    UnbindDataTableChangedDelegates();
+
+    for (UDataTable* Table : BulletDataTables)
+    {
+        if (!Table)
+        {
+            continue;
+        }
+
+        FDataTableChangedBind Bind;
+        Bind.Table = Table;
+        Bind.Handle = Table->OnDataTableChanged().AddUObject(this, &UBulletConfig::HandleDataTableChanged);
+        DataTableChangedBinds.Add(Bind);
+    }
+}
+
+void UBulletConfig::UnbindDataTableChangedDelegates()
+{
+    for (const FDataTableChangedBind& Bind : DataTableChangedBinds)
+    {
+        if (UDataTable* Table = Bind.Table.Get())
+        {
+            Table->OnDataTableChanged().Remove(Bind.Handle);
+        }
+    }
+    DataTableChangedBinds.Reset();
+}
+
+void UBulletConfig::HandleDataTableChanged()
+{
+    // This is the missing piece for PIE iteration: editing rows inside a referenced UDataTable does not trigger
+    // UBulletConfig::PostEditChangeProperty, so we must invalidate our cached RuntimeTable explicitly.
+    bRuntimeTableDirty = true;
 }
 #endif

@@ -13,15 +13,15 @@
 class UBulletConfig;
 
 /**
- * Per-component registry for resolving runtime bullet instance ids by a lightweight alias.
+ * Per-component registry for resolving runtime bullet instance ids by a lightweight key.
  *
  * Purpose:
  * - AnimNotifies on simulated proxies do not run GA, but still need a stable way to find the spawned bullet instance.
  * - Gameplay code may also want to "name" a spawned bullet instance for later operations (process hit / destroy).
  *
  * Notes:
- * - Alias is a local runtime label. It does not replicate.
- * - Same alias overwrites by design (points to the latest spawn). This matches typical action combat usage:
+ * - Key is a local runtime label. It does not replicate.
+ * - Same key overwrites by design (points to the latest spawn). This matches typical action combat usage:
  *   one spawn window -> zero or more manual-hit events -> destroy.
  */
 USTRUCT()
@@ -29,33 +29,33 @@ struct FBulletInstanceRegistry
 {
 	GENERATED_BODY()
 
-	/** Alias -> InstanceId. Overwrite when alias already exists. */
+	/** Key -> InstanceId. Overwrite when key already exists. */
 	UPROPERTY(Transient)
-	TMap<FName, int32> InstanceAliasMap;
+	TMap<FName, int32> InstanceKeyMap;
 
-	void ClearAliasMap() { InstanceAliasMap.Reset(); }
-	bool RemoveAlias(FName Alias) { return !Alias.IsNone() && InstanceAliasMap.Remove(Alias) > 0; }
-	void AddToAliasMap(FName Alias, int32 InstanceId)
+	void ClearKeyMap() { InstanceKeyMap.Reset(); }
+	bool RemoveKey(FName Key) { return !Key.IsNone() && InstanceKeyMap.Remove(Key) > 0; }
+	void AddToKeyMap(FName Key, int32 InstanceId)
 	{
-		if (Alias.IsNone())
+		if (Key.IsNone())
 		{
 			return;
 		}
 		if (InstanceId == INDEX_NONE)
 		{
-			InstanceAliasMap.Remove(Alias);
+			InstanceKeyMap.Remove(Key);
 			return;
 		}
-		InstanceAliasMap.Add(Alias, InstanceId);
+		InstanceKeyMap.Add(Key, InstanceId);
 	}
 	
-	int32 GetInstanceAlias(FName Alias) const
+	int32 GetInstanceIdByKey(FName Key) const
 	{
-		if (Alias.IsNone())
+		if (Key.IsNone())
 		{
 			return INDEX_NONE;
 		}
-		if (const int32* Found = InstanceAliasMap.Find(Alias))
+		if (const int32* Found = InstanceKeyMap.Find(Key))
 		{
 			return *Found;
 		}
@@ -78,23 +78,23 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem")
 	UBulletConfig* GetBulletConfig() const { return BulletConfig; }
 
-	/** Resolve a runtime bullet instance by alias. Invalid entries are pruned. */
+	/** Resolve a runtime bullet instance by key. Invalid entries are pruned. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|InstanceRegistry")
-	int32 GetInstanceIdByAlias(FName InstanceAlias) const;
+	int32 GetInstanceIdByKey(FName InstanceKey) const;
 
-	/** Set or overwrite alias -> InstanceId. Passing INDEX_NONE removes the alias. */
+	/** Set or overwrite key -> InstanceId. Passing INDEX_NONE removes the key. */
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
-	void SetInstanceIdAlias(FName InstanceAlias, int32 InstanceId);
-
-	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
-	bool RemoveInstanceAlias(FName InstanceAlias);
+	void SetInstanceIdKey(FName InstanceKey, int32 InstanceId);
 
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
-	void ClearInstanceAliases();
+	bool RemoveInstanceKey(FName InstanceKey);
 
-	/** True if alias resolves to a live bullet instance. Invalid entries are pruned. */
+	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
+	void ClearInstanceKeys();
+
+	/** True if key resolves to a live bullet instance. Invalid entries are pruned. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|InstanceRegistry")
-	bool IsInstanceAliasValid(FName InstanceAlias) const;
+	bool IsInstanceKeyValid(FName InstanceKey) const;
 
 	// Local spawn entry.
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
@@ -102,7 +102,7 @@ public:
 
 	// Request destroy for a bullet instance (local).
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
-	bool DestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren);
+	bool DestroyBullet(int32 InstanceId);
 
 	// Manual-hit trigger: process stored overlaps as hits (fires OnHit logic chain, interact, collision response).
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
@@ -110,7 +110,7 @@ public:
 
 private:
 	int32 SpawnBulletInternal(FName BulletId, const FBulletInitParams& InitParams);
-	bool DestroyBulletInternal(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const;
+	bool DestroyBulletInternal(int32 InstanceId) const;
 	int32 ProcessManualHitsInternal(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
 	bool IsInstanceIdValid(int32 InstanceId) const;
 

@@ -17,7 +17,7 @@ class BULLETGAME_API UBulletLogicControllerBlueprintBase : public UBulletLogicCo
 public:
     virtual void OnBegin(FBulletInfo& BulletInfo) override;
     virtual void OnHit(FBulletInfo& BulletInfo, const FHitResult& Hit) override;
-    virtual void OnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason) override;
+    virtual void OnDestroy(FBulletInfo& BulletInfo) override;
     virtual void OnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit) override;
     virtual void OnSupport(FBulletInfo& BulletInfo) override;
     virtual void OnHitBullet(FBulletInfo& BulletInfo, int32 OtherBulletId) override;
@@ -39,7 +39,7 @@ protected:
     void K2_OnHit(const FBulletInfo& BulletInfo, const FHitResult& Hit);
 
     UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|Logic", meta = (DisplayName = "OnDestroy"))
-    void K2_OnDestroy(const FBulletInfo& BulletInfo, EBulletDestroyReason Reason);
+    void K2_OnDestroy(const FBulletInfo& BulletInfo);
 
     UFUNCTION(BlueprintNativeEvent, Category = "BulletSystem|Logic", meta = (DisplayName = "OnRebound"))
     void K2_OnRebound(const FBulletInfo& BulletInfo, const FHitResult& Hit);

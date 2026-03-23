@@ -28,7 +28,7 @@ public:
     // Lifecycle triggers.
     void HandleOnBegin(FBulletInfo& BulletInfo);
     void HandleOnHit(FBulletInfo& BulletInfo, const FHitResult& Hit);
-    void HandleOnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason);
+    void HandleOnDestroy(FBulletInfo& BulletInfo);
     void HandleOnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit);
     void HandleOnSupport(FBulletInfo& BulletInfo);
     void HandleOnHitBullet(FBulletInfo& BulletInfo, int32 OtherBulletId);
@@ -57,7 +57,7 @@ private:
     TArray<TObjectPtr<UBulletLogicController>> OnHitControllers;
 
     UPROPERTY()
-    // Controllers fired when bullet is destroyed (destroy reason provided).
+    // Controllers fired when bullet is destroyed.
     TArray<TObjectPtr<UBulletLogicController>> OnDestroyControllers;
 
     UPROPERTY()

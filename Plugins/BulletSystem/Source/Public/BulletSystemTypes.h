@@ -72,7 +72,6 @@ enum class EBulletActionType : uint8
     Child,
     SummonBullet,
     SummonEntity,
-    DestroyBullet,
     DelayDestroyBullet,
     SceneInteract,
     UpdateEffect,
@@ -80,47 +79,8 @@ enum class EBulletActionType : uint8
     UpdateAttackerFrozen
 };
 
-/**
- * Why a bullet instance is being destroyed.
- *
- * This value is carried through `UBulletController::RequestDestroyBullet` -> `EBulletActionType::DestroyBullet` and
- * finally forwarded to logic via `UBulletActionLogicComponent::HandleOnDestroy(..., Reason)`.
- *
- * Notes:
- * - This is a high-level semantic reason for gameplay/logic/debug, not a low-level physics/collision response.
- * - A bullet may receive multiple destroy requests; treat the reason as "the reason of the destroy request that
- *   actually triggers OnDestroy for this instance" (implementation-dependent ordering).
- */
-UENUM(BlueprintType)
-enum class EBulletDestroyReason : uint8
-{
-    /** Destroyed because the configured lifetime (or OverrideLifeTime) has elapsed. */
-    LifeTimeExpired UMETA(DisplayName = "Lifetime Expired"),
-
-    /** Destroyed due to an accepted hit and the collision policy requested destruction (or max hit count reached). */
-    Hit UMETA(DisplayName = "Hit"),
-
-    /** Destroyed because the owning gameplay ability (or the ability-scoped context) has ended. */
-    AbilityEnd UMETA(DisplayName = "Ability End"),
-
-    /** Destroyed because its parent bullet instance was destroyed (parent-child linkage cleanup). */
-    ParentDestroyed UMETA(DisplayName = "Parent Destroyed"),
-
-    /** Destroyed explicitly by bullet logic (e.g. LogicData DestroyBullet controller). */
-    Logic UMETA(DisplayName = "Logic"),
-
-    /** Destroyed by external gameplay code, debug command, blueprint call, or other non-bullet-system trigger. */
-    External UMETA(DisplayName = "External"),
-
-    /**
-     * Immediate destroy request that should take effect in the same call.
-     *
-     * This bypasses the normal action queue for this instance and runs the destroy logic right away
-     * (fires OnDestroy and disables collision). The instance is still recycled/removed from the model
-     * during end-of-tick flush.
-     */
-    Immediate UMETA(DisplayName = "Immediate")
-};
+// Destroy reasons were intentionally removed. "Destroy" is always an explicit request that takes effect at end of tick,
+// and lifetime expiry is handled by the built-in lifetime tick.
 
 UENUM(BlueprintType)
 enum class EBulletCollisionResponse : uint8
@@ -281,25 +241,13 @@ struct FBulletDataMove
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (EditCondition = "MoveType == EBulletMoveType::Parabola"))
     float Gravity = 0.0f;
 
-    /** If true, initial direction uses owner's forward vector (otherwise uses spawn transform forward). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    bool bUseOwnerForward = true;
-
-    /** If true, use the provided spawn transform; otherwise spawn at owner location (plus offset). */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    bool bUseSpawnTransform = true;
-    
-    /** Spawn position offset (cm). Applied in owner space or world space depending on bSpawnOffsetInOwnerSpace. */
+    /** Spawn position offset (cm). Interpreted in spawn transform space. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     FVector SpawnLocationOffset = FVector::ZeroVector;
 
-    /** Rotation offset applied after aim/owner-forward resolution (degrees). */
+    /** Rotation offset applied after aim/spawn-forward resolution (degrees). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
     FRotator SpawnRotationOffset = FRotator::ZeroRotator;
-    
-    /** If true, SpawnOffset is interpreted in owner local space; otherwise in world space. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move")
-    bool bSpawnOffsetInOwnerSpace = true;
 
     /** If true, steer toward TargetActor every tick (straight/fixed-duration only). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Move", meta = (EditCondition = "MoveType == EBulletMoveType::Straight || MoveType == EBulletMoveType::FixedDuration"))
@@ -587,8 +535,6 @@ struct FBulletDataMain : public FTableRowBase
 
             Move.MoveType = EBulletMoveType::Straight;
             Move.Speed = 0.0f;
-            Move.bUseSpawnTransform = true;
-            Move.bUseOwnerForward = false;
             break;
         }
         case EBulletConfigProfile::Projectile:
@@ -608,8 +554,6 @@ struct FBulletDataMain : public FTableRowBase
 
             Move.MoveType = EBulletMoveType::Straight;
             Move.Speed = 1200.0f;
-            Move.bUseOwnerForward = true;
-            Move.bUseSpawnTransform = true;
             break;
         }
         case EBulletConfigProfile::Custom:
@@ -648,44 +592,17 @@ struct FBulletInitParams
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    int32 AbilityId = INDEX_NONE;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    int32 ContextId = INDEX_NONE;
-
-    // Optional stable id for external systems. BulletSystem runtime does not currently use this field.
-    // Not inherited to child bullets.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    int32 NetBulletId = INDEX_NONE;
-
     // Per-instance payload (typically filled by GA/Gameplay code at spawn time).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     FBulletPayload Payload;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    FVector SizeOverride = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    FVector SpawnOffset = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     int32 ParentInstanceId = INDEX_NONE;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    float OverrideLifeTime = -1.0f;
-
-    // Optional override for initial collision enabled state.
-    // -1: use FBulletDataBase::bCollisionEnabledOnSpawn
-    //  0: force collision disabled (visual-only bullets on clients)
-    //  1: force collision enabled
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init", meta = (ClampMin = "-1", ClampMax = "1"))
-    int32 CollisionEnabledOverride = -1;
-
-    // Optional per-instance alias used for runtime lookup (e.g. AnimNotify spawn -> later process/destroy by name).
+    // Optional per-instance key used for runtime lookup (e.g. AnimNotify spawn -> later process/destroy by name).
     // This is a local runtime label and is not used by BulletSystem core simulation.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
-    FName InstanceAlias = NAME_None;
+    FName InstanceKey = NAME_None;
 };
 
 USTRUCT(BlueprintType)
@@ -699,11 +616,10 @@ struct FBulletActionInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     float Delay = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
-    EBulletDestroyReason DestroyReason = EBulletDestroyReason::External;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
-    bool bSpawnChildren = false;
+    // Destroy metadata and spawn-children toggles were removed:
+    // - destroy is always an explicit request that takes effect at end of tick
+    // - lifetime expiry uses the same destroy path
+    // - child spawning is governed by bullet config (bSpawnOnDestroy / bSpawnOnHit)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     FName ChildBulletId;

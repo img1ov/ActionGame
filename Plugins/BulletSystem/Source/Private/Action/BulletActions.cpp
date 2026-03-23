@@ -108,37 +108,13 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
     const FBulletDataAimed& AimedData = BulletInfo.Config.Aimed;
     const AActor* Owner = BulletInfo.InitParams.Owner;
 
-    // Step 1: Resolve spawn basis (SpawnTransform vs Owner fallback).
+    // Step 1: Spawn basis always comes from InitParams.SpawnTransform (no owner fallback).
     FVector SpawnLocation = BulletInfo.InitParams.SpawnTransform.GetLocation();
     FRotator SpawnRotation = BulletInfo.InitParams.SpawnTransform.GetRotation().Rotator();
-    const bool bSpawnTransformIsIdentity = BulletInfo.InitParams.SpawnTransform.Equals(FTransform::Identity);
-
-#if WITH_EDITOR
-    if (MoveData.bUseSpawnTransform && Owner && bSpawnTransformIsIdentity)
-    {
-        UE_LOG(LogBullet, Warning, TEXT("InitMove: InstanceId=%d BulletId=%s uses SpawnTransform but it is Identity. Did you forget to set InitParams.SpawnTransform? Owner=%s"),
-            BulletInfo.InstanceId,
-            *BulletInfo.Config.BulletId.ToString(),
-            *GetNameSafe(BulletInfo.InitParams.Owner));
-    }
-#endif
-
-    // SpawnTransform is an optional input for the spawn API. If designers choose to use it but gameplay code doesn't
-    // provide one (Identity), fallback to owner transform to avoid spawning at world origin.
-    if (Owner && (!MoveData.bUseSpawnTransform || bSpawnTransformIsIdentity))
-    {
-        SpawnLocation = Owner->GetActorLocation();
-        SpawnRotation = Owner->GetActorRotation();
-    }
 
     // Step 2: Apply spawn offsets (config + per-shot init params).
-    FVector ConfigOffset = MoveData.SpawnLocationOffset;
-    if (MoveData.bSpawnOffsetInOwnerSpace)
-    {
-        ConfigOffset = SpawnRotation.RotateVector(ConfigOffset);
-    }
+    const FVector ConfigOffset = SpawnRotation.RotateVector(MoveData.SpawnLocationOffset);
     SpawnLocation += ConfigOffset;
-    SpawnLocation += BulletInfo.InitParams.SpawnOffset;
 
     // Step 3: Resolve initial direction (aim/owner forward/spawn forward) and final rotation.
     const FVector BaseDirection = SpawnRotation.Vector();
@@ -160,10 +136,6 @@ void UBulletActionInitMove::Execute(UBulletController* InController, FBulletInfo
             }
             Direction = AimDirection;
         }
-    }
-    else if (MoveData.bUseOwnerForward && Owner)
-    {
-        Direction = Owner->GetActorForwardVector();
     }
 
     FRotator FinalRotation = Direction.ToOrientationRotator() + MoveData.SpawnRotationOffset;
@@ -258,14 +230,7 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
     BulletInfo.CollisionInfo.HitActors.Reset();
     BulletInfo.CollisionInfo.HitCount = 0;
     BulletInfo.CollisionInfo.LastHitTime = -BIG_NUMBER;
-    if (BulletInfo.InitParams.CollisionEnabledOverride >= 0)
-    {
-        BulletInfo.CollisionInfo.bCollisionEnabled = (BulletInfo.InitParams.CollisionEnabledOverride != 0);
-    }
-    else
-    {
-        BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
-    }
+    BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
     BulletInfo.CollisionInfo.OverlapActors.Reset();
 
 #if WITH_EDITOR
@@ -404,47 +369,6 @@ void UBulletActionSummonEntity::Execute(UBulletController* InController, FBullet
 }
 
 // Finalize bullet destruction and release resources.
-void UBulletActionDestroyBullet::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
-{
-    if (!InController)
-    {
-        return;
-    }
-
-    BulletInfo.DestroyWorldTime = InController->GetWorldTimeSeconds();
-    BulletInfo.bNeedDestroy = true;
-    BulletInfo.CollisionInfo.bCollisionEnabled = false;
-    BulletInfo.CollisionInfo.OverlapActors.Reset();
-    BulletInfo.CollisionInfo.HitActors.Reset();
-    BulletInfo.PendingDestroyDelay = 0.0f;
-
-    if (BulletInfo.Entity && BulletInfo.Entity->GetLogicComponent())
-    {
-        if (!BulletInfo.bIsSimple)
-        {
-            BulletInfo.Entity->GetLogicComponent()->HandleOnDestroy(BulletInfo, ActionInfo.DestroyReason);
-        }
-    }
-
-    if (ActionInfo.bSpawnChildren)
-    {
-        InController->RequestSummonChildren(BulletInfo, EBulletChildSpawnTrigger::OnDestroy);
-    }
-
-    if (BulletInfo.EffectInfo.NiagaraComponent)
-    {
-        if (UNiagaraComponent* NiagaraComponent = BulletInfo.EffectInfo.NiagaraComponent.Get())
-        {
-            NiagaraComponent->Deactivate();
-        }
-        BulletInfo.EffectInfo.NiagaraComponent = nullptr;
-    }
-
-    UE_LOG(LogBullet, Verbose, TEXT("DestroyBullet: InstanceId=%d Reason=%d"), BulletInfo.InstanceId, static_cast<int32>(ActionInfo.DestroyReason));
-
-    InController->MarkBulletForDestroy(BulletInfo.InstanceId);
-}
-
 void UBulletActionDelayDestroyBullet::Execute(UBulletController* InController, FBulletInfo& BulletInfo, const FBulletActionInfo& ActionInfo)
 {
     BulletInfo.PendingDestroyDelay = ActionInfo.Delay;
@@ -466,7 +390,7 @@ void UBulletActionDelayDestroyBullet::Tick(UBulletController* InController, FBul
     if (BulletInfo.PendingDestroyDelay <= 0.0f)
     {
         UE_LOG(LogBullet, Verbose, TEXT("DelayDestroy elapsed: InstanceId=%d"), BulletInfo.InstanceId);
-        InController->RequestDestroyBullet(BulletInfo.InstanceId, EBulletDestroyReason::External, true);
+        InController->RequestDestroyBullet(BulletInfo.InstanceId);
     }
 }
 
@@ -551,11 +475,11 @@ void UBulletActionUpdateLiveTime::Tick(UBulletController* InController, FBulletI
 
     BulletInfo.LiveTime += DeltaSeconds * BulletInfo.TimeScale;
 
-    const float LifeTime = BulletInfo.InitParams.OverrideLifeTime > 0.0f ? BulletInfo.InitParams.OverrideLifeTime : BulletInfo.Config.Base.LifeTime;
+    const float LifeTime = BulletInfo.Config.Base.LifeTime;
     if (LifeTime > 0.0f && BulletInfo.LiveTime >= LifeTime)
     {
         UE_LOG(LogBullet, Verbose, TEXT("LifeTime expired: InstanceId=%d"), BulletInfo.InstanceId);
-        InController->RequestDestroyBullet(BulletInfo.InstanceId, EBulletDestroyReason::LifeTimeExpired, true);
+        InController->RequestDestroyBullet(BulletInfo.InstanceId);
     }
 }
 

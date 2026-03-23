@@ -28,11 +28,27 @@ public:
     void RebuildRuntimeTable() const;
 
 #if WITH_EDITOR
+    virtual void PostLoad() override;
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+    virtual void BeginDestroy() override;
 #endif
 
 private:
     // Runtime lookup table for fast access (not UPROPERTY on purpose).
     mutable TMap<FName, FBulletDataMain> RuntimeTable;
     mutable bool bRuntimeTableDirty = true;
+
+#if WITH_EDITOR
+    struct FDataTableChangedBind
+    {
+        TWeakObjectPtr<UDataTable> Table;
+        FDelegateHandle Handle;
+    };
+
+    void BindDataTableChangedDelegates();
+    void UnbindDataTableChangedDelegates();
+    void HandleDataTableChanged();
+
+    TArray<FDataTableChangedBind> DataTableChangedBinds;
+#endif
 };

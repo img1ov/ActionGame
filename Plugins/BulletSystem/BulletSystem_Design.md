@@ -1,5 +1,7 @@
 ﻿﻿# BulletSystem 模块设计详解
 
+另见：`BulletSystem_Usage.md`（面向落地的使用教程）
+
 > 面向实现与维护的工程说明，聚焦架构分层、运行流程、扩展点与性能策略。
 
 ## 1. 设计目标
@@ -36,9 +38,9 @@ LogicController / Render / Interact / Pool
 
 - `FBulletDataMain`：子弹配置入口，包含 Base/Logic/Move/Render/Execution/Child/Interact 等子块。
 - `FBulletDataBase`：形状、生命周期、碰撞策略、命中间隔、碰撞模式等基础字段。
-- `FBulletDataMove`：运动类型、速度、跟踪、固定时长、环绕等。
+- `FBulletDataMove`：运动类型、速度、跟踪、固定时长、环绕等。出生基准永远来自 `InitParams.SpawnTransform`，配置侧只提供 Offset 等“模板级”修饰量。
 - `FBulletDataExecution`：LogicData 列表，驱动玩法逻辑扩展。
-- `FBulletDataRender`：仅负责表现资源（Niagara/Mesh/ActorClass）。跟随/附着由 `Move.MoveType=Attached` 统一负责，避免“表现跟随但碰撞不跟随”的无效选项。
+- `FBulletDataRender`：仅负责表现资源（Niagara/Mesh/ActorClass）。表现资源挂在 `ABulletActor` 上，Actor 每帧由 MoveSystem 同步到 `MoveInfo`，因此特效会天然跟随子弹一起运动。跟随/附着由 `Move.MoveType=Attached` 统一负责，避免“表现跟随但碰撞不跟随”的无效选项。
 
 ### 3.2 关键能力
 
@@ -115,19 +117,19 @@ LogicController / Render / Interact / Pool
 
 ### 7.3 销毁流程
 
-通过 `DestroyBullet` Action 统一处理：
+通过 `UBulletController::RequestDestroyBullet(InstanceId)` 统一处理（立即生效，帧末统一回收）：
 
 - 标记销毁、清理碰撞状态
 - 触发 OnDestroy 逻辑
-- 触发子弹生成（可选）
+- 触发子弹生成（由子弹配置 `bSpawnOnDestroy` 决定）
 - 回收渲染/实体资源
 
 避免直接销毁导致的资源泄露或顺序问题。
 
 补充说明：
 
-- 常规销毁会通过 `RequestDestroyBullet` 入队 `DestroyBullet` Action，在动作执行后标记 `NeedDestroy`，并在 `AfterTick` 阶段 `FlushDestroyedBullets()` 统一回收进对象池。
-- `EBulletDestroyReason::Immediate` 用于需要“同一调用立刻生效”的场景：会立即触发 OnDestroy 并关闭碰撞，但对象池回收仍然在帧末 Flush 统一完成（避免在高频系统迭代中直接移除导致不稳定）。
+- 不区分销毁原因：主动删除和生命周期到期都走同一路径。
+- `RequestDestroyBullet` 会立即触发 OnDestroy 并关闭碰撞，但对象池回收仍然在帧末 `FlushDestroyedBullets()` 统一完成（避免在高频系统迭代中直接移除导致不稳定）。
 
 ## 8. 高频系统层
 
@@ -140,6 +142,17 @@ LogicController / Render / Interact / Pool
 - 允许 `ReplaceMove` 逻辑替换默认运动
 
 其中 `Attached` 会跟随 Owner 的 Transform，并保留进入 Attached 状态时捕获的相对偏移。
+
+补充约定：
+
+- `InitParams.SpawnTransform` 必须由调用方提供（系统不做 Owner 兜底）。
+- `Move.SpawnLocationOffset` 解释为 **SpawnTransform 空间**下的偏移（跟是否 Attached 无冲突；Attached 时等价于改变初始相对偏移）。
+- Aim 只影响初始方向解析（以及相关的旋转），不会改变出生基准来源。
+
+设计理由（为什么不做兜底/不提供额外开关）：
+
+- **语义单一**：Spawn 位置与朝向只由 `InitParams.SpawnTransform (+ Move 的 Offset)` 决定，避免“同一颗子弹到底用谁的 transform”这种隐式分支。
+- **更适合 AN/ANS/GA 分工**：AN/ANS/GA 在调用点显式构建 InitParams，比在 DataMain 里用开关做推断更可控，也更容易查错。
 
 ### 8.2 CollisionSystem
 
@@ -193,7 +206,7 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
   - BeginPlay: `OnWorldBeginPlay()` 按策略调用 `UBulletController::Shutdown()` 清空对象池与存活子弹
   - StopPlay: 监听 `FGameDelegates::EndPlayMapDelegate`（以及 WorldCleanup 兜底）按策略重置
 - 迭代/调试时可手动触发：
-  - BP: `UBulletBlueprintLibrary::ClearBulletSystemRuntime(WorldContext, bRebuildRuntimeTable)`
+  - BP: `UBulletSystemBlueprintLibrary::ClearBulletSystemRuntime(WorldContext, bRebuildRuntimeTable)`
 
 ## 11. 生命周期流程（简版）
 
@@ -203,8 +216,8 @@ Move 与 Collision 拆分，保证职责单一与性能可控。
 4. InitMove/InitCollision/InitRender 等子动作执行
 5. MoveSystem / CollisionSystem 高频运行
 6. 命中触发逻辑控制器
-7. Destroy Action 统一清理
-8. 回收对象池
+7. `RequestDestroyBullet` 标记销毁（立即关闭碰撞并触发 OnDestroy，回收在帧末 Flush）
+8. 帧末 `FlushDestroyedBullets()` 回收对象池
 
 ## 12. 维护关注点
 
@@ -280,12 +293,12 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 
 - **OnCreate**：当既不 OnHit 也不 OnDestroy 时，系统在创建后通过 Action 链路生成子弹（保持生命周期顺序）。
 - **OnHit**：`HandleHitResult(...)` 内部会调用 `RequestSummonChildren(Info, OnHit)`，再把 spawn 转为 `SummonBullet` Action 入队，避免 tick 中途改写运行态容器。
-- **OnDestroy**：销毁阶段同理会触发 `RequestSummonChildren(Info, OnDestroy)`（由 Destroy Action 统一调度，避免直接生成导致顺序/资源回收问题）。
+- **OnDestroy**：`RequestDestroyBullet(...)` 会触发 `RequestSummonChildren(Info, OnDestroy)`，派生子弹仍通过 `SummonBullet` Action 入队，避免 tick 中途改写运行态容器。
 
-#### 13.4.3 继承与生命周期绑定（ParentInstanceId / ParentDestroyed）
+#### 13.4.3 继承与生命周期绑定（ParentInstanceId / Parent 清理）
 
-- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ContextId / AbilityId / ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
-- 当 Parent 被销毁时，系统会在 FlushDestroyedBullets 阶段传播 `ParentDestroyed` 给“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
+- Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
+- 当 Parent 被销毁时，系统会在 `FlushDestroyedBullets()` 阶段清理“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
 
 ## 14. 碰撞与命中（最容易踩坑的部分）
 
@@ -307,7 +320,7 @@ BulletSystem 的碰撞不是基于 `UBoxComponent/USphereComponent`，而是每 
 - `HitTrigger = Manual`
   - CollisionSystem 只会把命中的 Actor 收集到 `BulletInfo.CollisionInfo.OverlapActors`
   - 并不会派发 `HandleHitResult`，因此不会触发 OnHit
-  - 正确用法：在你需要结算的时机调用 `UBulletBlueprintLibrary::ProcessManualHits(InstanceId, ...)`
+  - 正确用法：在你需要结算的时机调用 `UBulletSystemBlueprintLibrary::ProcessManualHits(InstanceId, ...)`
 
 这也是 HitBox profile 的默认设计：HitBox = Overlap + Manual，适合“攻击帧/节奏点”手动结算。
 
@@ -464,7 +477,7 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - GA/Gameplay 在 `SpawnBullet` 时写入：
   - `InitParams.Payload.SetByCallerNameMagnitudes` 或
   - `InitParams.Payload.SetByCallerTagMagnitudes`
-  - 蓝图侧推荐用 `UBulletBlueprintLibrary::SetPayloadSetByCallerMagnitudeByName/Tag` 写入（避免直接暴露 payload map）
+  - 蓝图侧推荐用 `UBulletSystemBlueprintLibrary::SetPayloadSetByCallerMagnitudeByName/Tag` 写入（避免直接暴露 payload map）
 - 子弹配置里添加 `UBulletLogicData_ApplyGameplayEffect`（命中触发）
 - 命中时 `UBulletLogicController_ApplyGameplayEffect` 会创建 `GameplayEffectSpec`，把 Payload 的 SetByCaller 写入后再 Apply 到目标
 
@@ -484,14 +497,15 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 当 `Base.HitTrigger = Manual` 时，你可以把 HitBox 当成“持续收集碰撞的传感器”，然后在攻击帧调用：
 
-- `UBulletBlueprintLibrary::ProcessManualHits(WorldContext, InstanceId, bResetHitActorsBefore, bApplyCollisionResponse)`
+- `UBulletSystemBlueprintLibrary::ProcessManualHits(WorldContext, InstanceId, bResetHitActorsBefore, bApplyCollisionResponse)`
 
 它会把当前收集到的 `OverlapActors` 逐个走 `HandleHitResult`，从而触发 `OnHit` 逻辑链。
 
-#### 15.3.7 蓝图可用 API 速查（BulletBlueprintLibrary）
+#### 15.3.7 蓝图可用 API 速查（BulletSystemBlueprintLibrary）
 
-- `SpawnBullet(WorldContext, ConfigAsset, BulletId, InitParams) -> InstanceId`
-- `DestroyBullet(WorldContext, InstanceId, Reason, bSpawnChildren)`
+- `SpawnBullet(SourceActor, BulletId, InitParams) -> InstanceId`
+- `GetInstanceIdByKey(SourceActor, InstanceKey) -> InstanceId`（InstanceRegistry 查询）
+- `DestroyBullet(WorldContext, InstanceId)`
 - `IsBulletValid(WorldContext, InstanceId)`
 - `SetBulletCollisionEnabled(WorldContext, InstanceId, bEnabled, bClearOverlaps, bResetHitActors)`
 - `ResetBulletHitActors(WorldContext, InstanceId)`
@@ -505,6 +519,12 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - `GetPayloadSetByCallerMagnitudeByTag(BulletInfo, DataTag) -> (bFound, Magnitude)`
 - `GetPayloadSetByCallerMagnitudeByNameFromPayload(Payload, DataName) -> (bFound, Magnitude)`
 - `GetPayloadSetByCallerMagnitudeByTagFromPayload(Payload, DataTag) -> (bFound, Magnitude)`
+
+#### 15.3.8 蓝图使用指南（最短链路）
+
+- **纯蓝图/非 GAS**：AnimNotify(或任意 BP) 构建 `FBulletInitParams`（Owner/SpawnTransform/Payload/InstanceKey），直接调用 `SpawnBullet`。需要手动结算的 HitBox 则在攻击帧调用 `ProcessManualHits`。
+- **GAS（推荐）**：AN/ANS 只负责“时机”，GA 构建/补全 `InitParams.Payload`（SetByCaller），最终调用 `SpawnBullet`。伤害结算在 Server 的 OnHit 里 Apply GE（Payload 注入 SetByCaller）。
+- **InstanceKey**：当你需要“Spawn 后在其它时机 ProcessManualHits/Destroy”时，用 `InitParams.InstanceKey` 做运行态句柄；通过 `GetInstanceIdByKey` 找到 `InstanceId` 后再调用对应函数。
 
 ## 16. 配置案例
 
@@ -569,22 +589,28 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 - **自主代理（AutonomousProxy）**：和服务端一致跑 GA（LocalPredicted / Server），在 GA 中注入 Payload（SetByCaller 等）后再 Spawn 子弹。
 - **模拟端（SimulatedProxy）**：不执行 GA，但仍会播放蒙太奇并触发 AnimNotify。模拟端应 **直接本地 Spawn 子弹** 用于表现，且建议开启碰撞用于驱动击中特效等视觉反馈；但伤害/环境交互必须保持权威（服务端执行）。
 
-### 18.1 InstanceAlias 运行时句柄
+### 18.1 InstanceKey 运行时句柄
 
-AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 BulletSystem 引入了 **InstanceAlias**：
+AnimNotify 的 ProcessManualHits/Destroy 需要 `InstanceId`。在联机下，`InstanceId` 无法从 Notify 直接稳定获取，因此 BulletSystem 引入了 **InstanceKey**：
 
-- `AN_Bullet_SpawnBullet`：写入 `InitParams.InstanceAlias`（推荐显式配置）。如果未配置，则默认用 `BulletId` 作为别名。Spawn 后由 `UBulletSystemComponent` 的 `FBulletInstanceRegistry` 将 `Alias -> InstanceId` 写入运行时表。
-- `AN_Bullet_ProcessManualHits` / `AN_Bullet_DestroyBullet`：用同一个 `InstanceAlias` 解析到 `InstanceId`，再调用 `ProcessManualHits/DestroyBullet`。
+- `AN_SpawnBullet`：写入 `InitParams.InstanceKey`（推荐显式配置）。如果未配置，则默认用 `BulletId` 作为 Key。Spawn 后由 `UBulletSystemComponent` 的 `FBulletInstanceRegistry` 将 `Key -> InstanceId` 写入运行时表。
+- `AN_ProcessManualHits` / `AN_DestroyBullet`：用同一个 `InstanceKey` 解析到 `InstanceId`，再调用 `ProcessManualHits/DestroyBullet`。
 
-### 18.2 ANS_Bullet_SpawnBullet（窗口型）
+蓝图查询入口：
 
-`ANS_Bullet_SpawnBullet` 用 NotifyState 自带的 `NotifyId`（编辑器内每个 Notify 实例生成唯一 ID）作为默认别名（当未配置 `InstanceAlias` 时），避免手动管理句柄：
+- `UBulletSystemBlueprintLibrary::GetInstanceIdByKey(SourceActor, InstanceKey)`（内部转发到 `UBulletSystemComponent::GetInstanceIdByKey`）
 
-- Begin：记录 `NotifyId -> InstanceId`
-- End：根据 `NotifyId` Destroy
+### 18.2 ANS_SpawnBullet（窗口型）
+
+`ANS_SpawnBullet` 用 Begin/End 两个时机提供一个“Spawn 窗口”：
+
+- Begin：按 `InstanceKey` 查找对应 `InstanceId`（若为空则默认用 `BulletId` 作为 Key），并执行 Spawn
+- End：用同一个 Key 找回 `InstanceId` 并执行 Destroy
+
+如果存在多个窗口可能重叠，必须显式配置不同的 `InstanceKey`，否则会互相覆盖映射。
 
 注意：Authority/Autonomous 侧如果配置了 `EndEventTag`，End 阶段会通过 GameplayEvent 通知 GA 执行 Destroy；
-未配置时将直接按 `InstanceAlias` 在本地 Destroy（适合非 GAS 场景）。
+未配置时将直接按 `InstanceKey` 在本地 Destroy（适合非 GAS 场景）。
 
 ### 18.3 权威守门（环境交互）
 

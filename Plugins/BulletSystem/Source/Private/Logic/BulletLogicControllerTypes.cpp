@@ -51,7 +51,7 @@ void UBulletLogicDestroyBulletController::OnHit(FBulletInfo& BulletInfo, const F
         return;
     }
 
-    Controller->RequestDestroyBullet(BulletInfo.InstanceId, DestroyData->Reason, false);
+    Controller->RequestDestroyBullet(BulletInfo.InstanceId);
 }
 
 void UBulletLogicForceController::OnBegin(FBulletInfo& BulletInfo)

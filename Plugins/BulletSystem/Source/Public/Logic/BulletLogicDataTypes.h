@@ -36,8 +36,7 @@ class BULLETGAME_API UBulletLogicDataDestroyBullet : public UBulletLogicData
 public:
     UBulletLogicDataDestroyBullet();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destroy")
-    EBulletDestroyReason Reason = EBulletDestroyReason::Logic;
+    // Destroy is always an explicit immediate request.
 };
 
 UCLASS(BlueprintType)

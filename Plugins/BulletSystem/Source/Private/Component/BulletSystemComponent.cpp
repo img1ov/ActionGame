@@ -63,19 +63,19 @@ int32 UBulletSystemComponent::SpawnBulletInternal(FName BulletId, const FBulletI
 	int32 InstanceId = INDEX_NONE;
 	Subsystem->GetController()->SpawnBullet(InitParams, BulletId, InstanceId, BulletConfig);
 
-	if (InstanceId != INDEX_NONE && !InitParams.InstanceAlias.IsNone())
+	if (InstanceId != INDEX_NONE && !InitParams.InstanceKey.IsNone())
 	{
-		InstanceRegistry.AddToAliasMap(InitParams.InstanceAlias, InstanceId);
+		InstanceRegistry.AddToKeyMap(InitParams.InstanceKey, InstanceId);
 	}
 	return InstanceId;
 }
 
-bool UBulletSystemComponent::DestroyBullet(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren)
+bool UBulletSystemComponent::DestroyBullet(int32 InstanceId)
 {
-	return DestroyBulletInternal(InstanceId, Reason, bSpawnChildren);
+	return DestroyBulletInternal(InstanceId);
 }
 
-bool UBulletSystemComponent::DestroyBulletInternal(int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren) const
+bool UBulletSystemComponent::DestroyBulletInternal(int32 InstanceId) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -89,7 +89,7 @@ bool UBulletSystemComponent::DestroyBulletInternal(int32 InstanceId, EBulletDest
 		return false;
 	}
 
-	Subsystem->GetController()->RequestDestroyBullet(InstanceId, Reason, bSpawnChildren);
+	Subsystem->GetController()->RequestDestroyBullet(InstanceId);
 	return true;
 }
 
@@ -144,9 +144,9 @@ bool UBulletSystemComponent::IsInstanceIdValid(int32 InstanceId) const
 	return Info != nullptr && !Info->bNeedDestroy;
 }
 
-int32 UBulletSystemComponent::GetInstanceIdByAlias(FName InstanceAlias) const
+int32 UBulletSystemComponent::GetInstanceIdByKey(FName InstanceKey) const
 {
-	const int32 InstanceId = InstanceRegistry.GetInstanceAlias(InstanceAlias);
+	const int32 InstanceId = InstanceRegistry.GetInstanceIdByKey(InstanceKey);
 	if (InstanceId == INDEX_NONE)
 	{
 		return INDEX_NONE;
@@ -154,30 +154,30 @@ int32 UBulletSystemComponent::GetInstanceIdByAlias(FName InstanceAlias) const
 
 	if (!IsInstanceIdValid(InstanceId))
 	{
-		// Lazy prune to avoid stale alias accumulation (e.g. bullet lifetime expiry).
-		InstanceRegistry.InstanceAliasMap.Remove(InstanceAlias);
+		// Lazy prune to avoid stale key accumulation (e.g. bullet lifetime expiry).
+		InstanceRegistry.InstanceKeyMap.Remove(InstanceKey);
 		return INDEX_NONE;
 	}
 
 	return InstanceId;
 }
 
-void UBulletSystemComponent::SetInstanceIdAlias(FName InstanceAlias, int32 InstanceId)
+void UBulletSystemComponent::SetInstanceIdKey(FName InstanceKey, int32 InstanceId)
 {
-	InstanceRegistry.AddToAliasMap(InstanceAlias, InstanceId);
+	InstanceRegistry.AddToKeyMap(InstanceKey, InstanceId);
 }
 
-bool UBulletSystemComponent::RemoveInstanceAlias(FName InstanceAlias)
+bool UBulletSystemComponent::RemoveInstanceKey(FName InstanceKey)
 {
-	return InstanceRegistry.RemoveAlias(InstanceAlias);
+	return InstanceRegistry.RemoveKey(InstanceKey);
 }
 
-void UBulletSystemComponent::ClearInstanceAliases()
+void UBulletSystemComponent::ClearInstanceKeys()
 {
-	InstanceRegistry.ClearAliasMap();
+	InstanceRegistry.ClearKeyMap();
 }
 
-bool UBulletSystemComponent::IsInstanceAliasValid(FName InstanceAlias) const
+bool UBulletSystemComponent::IsInstanceKeyValid(FName InstanceKey) const
 {
-	return GetInstanceIdByAlias(InstanceAlias) != INDEX_NONE;
+	return GetInstanceIdByKey(InstanceKey) != INDEX_NONE;
 }

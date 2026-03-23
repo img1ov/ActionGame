@@ -3,11 +3,13 @@
 #include "Blueprint/BulletSystemBlueprintLibrary.h"
 #include "BulletLogChannels.h"
 #include "BulletSystemComponent.h"
+#include "Config/BulletConfig.h"
 #include "Controller/BulletWorldSubsystem.h"
 #include "Controller/BulletController.h"
 #include "BulletSystemInterface.h"
 #include "Model/BulletModel.h"
 #include "Engine/World.h"
+#include "UObject/UObjectIterator.h"
 
 int32 UBulletSystemBlueprintLibrary::SpawnBullet(AActor* SourceActor, FName BulletId, const FBulletInitParams& InitParams)
 {
@@ -38,7 +40,28 @@ int32 UBulletSystemBlueprintLibrary::SpawnBullet(AActor* SourceActor, FName Bull
     return BulletComponent->SpawnBullet(BulletId, InitParams);
 }
 
-bool UBulletSystemBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 InstanceId, EBulletDestroyReason Reason, bool bSpawnChildren)
+int32 UBulletSystemBlueprintLibrary::GetInstanceIdByKey(AActor* SourceActor, FName InstanceKey)
+{
+    if (!SourceActor || InstanceKey.IsNone())
+    {
+        return INDEX_NONE;
+    }
+
+    UBulletSystemComponent* BulletComponent = nullptr;
+    if (SourceActor->GetClass()->ImplementsInterface(UBulletSystemInterface::StaticClass()))
+    {
+        BulletComponent = IBulletSystemInterface::Execute_GetBulletSystemComponent(SourceActor);
+    }
+
+    if (!BulletComponent)
+    {
+        BulletComponent = SourceActor->FindComponentByClass<UBulletSystemComponent>();
+    }
+
+    return BulletComponent ? BulletComponent->GetInstanceIdByKey(InstanceKey) : INDEX_NONE;
+}
+
+bool UBulletSystemBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 InstanceId)
 {
     if (!WorldContextObject)
     {
@@ -57,7 +80,7 @@ bool UBulletSystemBlueprintLibrary::DestroyBullet(const UObject* WorldContextObj
         return false;
     }
 
-    Subsystem->GetController()->RequestDestroyBullet(InstanceId, Reason, bSpawnChildren);
+    Subsystem->GetController()->RequestDestroyBullet(InstanceId);
     return true;
 }
 
@@ -197,7 +220,6 @@ TArray<AActor*> UBulletSystemBlueprintLibrary::GetBulletHitActorsAtLastHitTime(c
 
 void UBulletSystemBlueprintLibrary::ClearBulletSystemRuntime(const UObject* WorldContextObject, bool bRebuildRuntimeTable)
 {
-    (void)bRebuildRuntimeTable;
     if (!WorldContextObject)
     {
         return;
@@ -214,6 +236,34 @@ void UBulletSystemBlueprintLibrary::ClearBulletSystemRuntime(const UObject* Worl
         if (UBulletController* Controller = Subsystem->GetController())
         {
             Controller->Shutdown();
+        }
+    }
+
+    if (bRebuildRuntimeTable)
+    {
+        // Rebuild config runtime tables used by this world so PIE config edits take effect immediately.
+        // (UBulletConfig caches a runtime lookup table that is normally rebuilt lazily.)
+        TSet<TWeakObjectPtr<UBulletConfig>> UniqueConfigs;
+        for (TObjectIterator<UBulletSystemComponent> It; It; ++It)
+        {
+            UBulletSystemComponent* Comp = *It;
+            if (!Comp || Comp->HasAnyFlags(RF_ClassDefaultObject) || Comp->GetWorld() != World)
+            {
+                continue;
+            }
+
+            if (UBulletConfig* Config = Comp->GetBulletConfig())
+            {
+                UniqueConfigs.Add(Config);
+            }
+        }
+
+        for (const TWeakObjectPtr<UBulletConfig>& ConfigPtr : UniqueConfigs)
+        {
+            if (const UBulletConfig* Config = ConfigPtr.Get())
+            {
+                Config->RebuildRuntimeTable();
+            }
         }
     }
 }
@@ -263,14 +313,10 @@ void UBulletSystemBlueprintLibrary::ClearInitParamsPayload(FBulletInitParams& In
     ClearPayload(InitParams.Payload);
 }
 
-void UBulletSystemBlueprintLibrary::SetInitParamsCollisionEnabledOverride(FBulletInitParams& InitParams, bool bCollisionEnabled)
+FBulletInitParams UBulletSystemBlueprintLibrary::SetBulletPayload(FBulletInitParams InitParams, const FBulletPayload& Payload)
 {
-    InitParams.CollisionEnabledOverride = bCollisionEnabled ? 1 : 0;
-}
-
-void UBulletSystemBlueprintLibrary::ClearInitParamsCollisionEnabledOverride(FBulletInitParams& InitParams)
-{
-    InitParams.CollisionEnabledOverride = -1;
+    InitParams.Payload = Payload;
+    return InitParams;
 }
 
 bool UBulletSystemBlueprintLibrary::GetPayloadSetByCallerMagnitudeByName(const FBulletInfo& BulletInfo, FName DataName, float& OutMagnitude)

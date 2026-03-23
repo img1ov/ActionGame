@@ -16,10 +16,10 @@ class USkeletalMeshComponent;
 
 /**
  * Payload carried via GameplayEventData.OptionalObject.
- * Used by GA to read notify parameters (BulletId/Alias/Process/Destroy parameters).
+ * Used by GA to read notify parameters (BulletId/InitParams/Process/Destroy parameters).
  */
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletSystemNotifyPayload : public UObject
+class BULLETGAME_API UBulletNotifyOptionalObject : public UObject
 {
 	GENERATED_BODY()
 
@@ -28,19 +28,14 @@ public:
 	FName BulletId = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	FName InstanceAlias = NAME_None;
+	FBulletInitParams InitParams;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
+	FName InstanceKey = NAME_None;
+
+	// ProcessManualHits parameters.
 	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
 	bool bResetHitActorsBefore = true;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	bool bApplyCollisionResponse = true;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	EBulletDestroyReason DestroyReason = EBulletDestroyReason::External;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	bool bSpawnChildren = true;
 };
 
 /**
@@ -57,9 +52,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName BulletId = NAME_None;
 
-	/** Runtime alias written into InitParams.InstanceAlias (used for later process/destroy lookups). */
+	/** Runtime key written into InitParams.InstanceKey (used for later process/destroy lookups). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName InstanceAlias = NAME_None;
+	FName InstanceKey = NAME_None;
 
 	/** Optional socket to use as spawn transform basis. If None/missing, uses mesh component transform. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
@@ -74,12 +69,16 @@ public:
 	bool bForceCollisionOnSimProxy = true;
 
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
+
+protected:
+	UFUNCTION(BlueprintNativeEvent, Category = "Bullet")
+	void OnNotify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) const;
 };
 
-/**
- * Process manual hits AnimNotify.
- * Targets the bullet instance by InstanceAlias.
- */
+ /**
+  * Process manual hits AnimNotify.
+  * Targets the bullet instance by InstanceKey.
+  */
 UCLASS(meta = (DisplayName = "Bullet Process Manual Hits"))
 class BULLETGAME_API UAN_ProcessManualHits : public UAnimNotify
 {
@@ -87,7 +86,7 @@ class BULLETGAME_API UAN_ProcessManualHits : public UAnimNotify
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName InstanceAlias = NAME_None;
+	FName InstanceKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag EventTag;
@@ -95,16 +94,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	bool bResetHitActorsBefore = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	bool bApplyCollisionResponse = true;
-
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
+
+protected:
+	UFUNCTION(BlueprintNativeEvent, Category = "Bullet")
+	void OnNotify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) const;
 };
 
-/**
- * Destroy bullet AnimNotify.
- * Targets the bullet instance by InstanceAlias.
- */
+ /**
+  * Destroy bullet AnimNotify.
+  * Targets the bullet instance by InstanceKey.
+  */
 UCLASS(meta = (DisplayName = "Bullet Destroy"))
 class BULLETGAME_API UAN_DestroyBullet : public UAnimNotify
 {
@@ -112,25 +112,23 @@ class BULLETGAME_API UAN_DestroyBullet : public UAnimNotify
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName InstanceAlias = NAME_None;
+	FName InstanceKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag EventTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	EBulletDestroyReason Reason = EBulletDestroyReason::External;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	bool bSpawnChildren = true;
-
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
+
+protected:
+	UFUNCTION(BlueprintNativeEvent, Category = "Bullet")
+	void OnNotify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) const;
 };
 
-/**
- * Spawn bullet during a window, auto-destroy at NotifyEnd.
- * If InstanceAlias is empty, a unique per-notify NotifyId will be used as the runtime alias.
- */
-UCLASS(meta = (DisplayName = "Bullet Spawn (State)"))
+ /**
+  * Spawn bullet during a window, auto-destroy at NotifyEnd.
+  * If InstanceKey is empty, BulletId will be used as the runtime key (author explicit keys for overlapping windows).
+  */
+ UCLASS(meta = (DisplayName = "Bullet Spawn (State)"))
 class BULLETGAME_API UANS_SpawnBullet : public UAnimNotifyState
 {
 	GENERATED_BODY()
@@ -140,7 +138,7 @@ public:
 	FName BulletId = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	FName InstanceAlias = NAME_None;
+	FName InstanceKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName SpawnSocketName = NAME_None;
@@ -151,12 +149,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag EndEventTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|End")
-	EBulletDestroyReason EndReason = EBulletDestroyReason::External;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|End")
-	bool bSpawnChildrenOnEnd = true;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|SimProxy")
 	bool bForceCollisionOnSimProxy = true;
 
@@ -164,14 +156,9 @@ public:
 	virtual void NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 
 protected:
-	virtual void PostInitProperties() override;
-	virtual void PostLoad() override;
-	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+	UFUNCTION(BlueprintNativeEvent, Category = "Bullet")
+	void OnBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference) const;
 
-private:
-	FName GetEffectiveAlias() const;
-
-	// Unique ID per notify instance for runtime mapping when InstanceAlias is not specified.
-	UPROPERTY(VisibleAnywhere, Category = "Bullet")
-	FName NotifyId;
+	UFUNCTION(BlueprintNativeEvent, Category = "Bullet")
+	void OnEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) const;
 };

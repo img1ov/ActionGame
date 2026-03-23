@@ -20,7 +20,7 @@ FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParam
     Info.SpawnWorldTime = 0.0f;
     Info.ParentInstanceId = InitParams.ParentInstanceId;
     Info.DestroyWorldTime = -1.0f;
-    Info.Size = (InitParams.SizeOverride.IsNearlyZero()) ? FVector::OneVector : InitParams.SizeOverride;
+    Info.Size = FVector::OneVector;
 
     if (Pool)
     {

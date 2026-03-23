@@ -103,13 +103,13 @@ void UBulletActionLogicComponent::HandleOnHit(FBulletInfo& BulletInfo, const FHi
     }
 }
 
-void UBulletActionLogicComponent::HandleOnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
+void UBulletActionLogicComponent::HandleOnDestroy(FBulletInfo& BulletInfo)
 {
     for (UBulletLogicController* LogicController : OnDestroyControllers)
     {
         if (LogicController)
         {
-            LogicController->OnDestroy(BulletInfo, Reason);
+            LogicController->OnDestroy(BulletInfo);
         }
     }
 }

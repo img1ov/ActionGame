@@ -33,7 +33,7 @@ public:
 
     virtual void OnBegin(FBulletInfo& BulletInfo) {}
     virtual void OnHit(FBulletInfo& BulletInfo, const FHitResult& Hit) {}
-    virtual void OnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason) {}
+    virtual void OnDestroy(FBulletInfo& BulletInfo) {}
     virtual void OnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit) {}
     virtual void OnSupport(FBulletInfo& BulletInfo) {}
     virtual void OnHitBullet(FBulletInfo& BulletInfo, int32 OtherBulletId) {}
@@ -56,4 +56,3 @@ protected:
     UPROPERTY()
     TObjectPtr<UBulletLogicData> Data;
 };
-

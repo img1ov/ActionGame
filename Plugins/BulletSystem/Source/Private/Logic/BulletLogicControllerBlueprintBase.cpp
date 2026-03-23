@@ -15,9 +15,9 @@ void UBulletLogicControllerBlueprintBase::OnHit(FBulletInfo& BulletInfo, const F
     K2_OnHit(BulletInfo, Hit);
 }
 
-void UBulletLogicControllerBlueprintBase::OnDestroy(FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
+void UBulletLogicControllerBlueprintBase::OnDestroy(FBulletInfo& BulletInfo)
 {
-    K2_OnDestroy(BulletInfo, Reason);
+    K2_OnDestroy(BulletInfo);
 }
 
 void UBulletLogicControllerBlueprintBase::OnRebound(FBulletInfo& BulletInfo, const FHitResult& Hit)
@@ -81,10 +81,9 @@ void UBulletLogicControllerBlueprintBase::K2_OnHit_Implementation(const FBulletI
     (void)Hit;
 }
 
-void UBulletLogicControllerBlueprintBase::K2_OnDestroy_Implementation(const FBulletInfo& BulletInfo, EBulletDestroyReason Reason)
+void UBulletLogicControllerBlueprintBase::K2_OnDestroy_Implementation(const FBulletInfo& BulletInfo)
 {
     (void)BulletInfo;
-    (void)Reason;
 }
 
 void UBulletLogicControllerBlueprintBase::K2_OnRebound_Implementation(const FBulletInfo& BulletInfo, const FHitResult& Hit)
@@ -147,4 +146,3 @@ bool UBulletLogicControllerBlueprintBase::K2_FilterHit_Implementation(FBulletInf
     (void)Hit;
     return true;
 }
-
