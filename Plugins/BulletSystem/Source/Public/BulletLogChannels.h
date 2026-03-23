@@ -6,5 +6,5 @@
 #include "Logging/LogMacros.h"
 
 // Bullet system debug channel (use Verbose/VeryVerbose for detailed tracing).
-BULLETGAME_API DECLARE_LOG_CATEGORY_EXTERN(LogBullet, Log, All);
+BULLETSYSTEM_API DECLARE_LOG_CATEGORY_EXTERN(LogBullet, Log, All);
 

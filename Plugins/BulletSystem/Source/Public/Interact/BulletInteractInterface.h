@@ -9,12 +9,12 @@
 #include "BulletInteractInterface.generated.h"
 
 UINTERFACE(BlueprintType)
-class BULLETGAME_API UBulletInteractInterface : public UInterface
+class BULLETSYSTEM_API UBulletInteractInterface : public UInterface
 {
     GENERATED_BODY()
 };
 
-class BULLETGAME_API IBulletInteractInterface
+class BULLETSYSTEM_API IBulletInteractInterface
 {
     GENERATED_BODY()
 

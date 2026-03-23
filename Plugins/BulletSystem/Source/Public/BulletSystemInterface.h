@@ -11,12 +11,12 @@
 class UBulletSystemComponent;
 
 UINTERFACE(BlueprintType)
-class BULLETGAME_API UBulletSystemInterface : public UInterface
+class BULLETSYSTEM_API UBulletSystemInterface : public UInterface
 {
 	GENERATED_BODY()
 };
 
-class BULLETGAME_API IBulletSystemInterface
+class BULLETSYSTEM_API IBulletSystemInterface
 {
 	GENERATED_BODY()
 

@@ -8,7 +8,7 @@
 #include "BulletCollisionSystem.generated.h"
 
 UCLASS()
-class BULLETGAME_API UBulletCollisionSystem : public UBulletSystemBase
+class BULLETSYSTEM_API UBulletCollisionSystem : public UBulletSystemBase
 {
     GENERATED_BODY()
 

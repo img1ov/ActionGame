@@ -12,7 +12,7 @@
 class UBulletLogicController;
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicData : public UPrimaryDataAsset
+class BULLETSYSTEM_API UBulletLogicData : public UPrimaryDataAsset
 {
     GENERATED_BODY()
 

@@ -23,7 +23,7 @@ struct FBulletActorPoolBucket
 };
 
 UCLASS()
-class BULLETGAME_API UBulletPool : public UObject
+class BULLETSYSTEM_API UBulletPool : public UObject
 {
     GENERATED_BODY()
 
@@ -42,7 +42,7 @@ private:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletActorPool : public UObject
+class BULLETSYSTEM_API UBulletActorPool : public UObject
 {
     GENERATED_BODY()
 
@@ -80,7 +80,7 @@ struct FBulletTraceElement
 };
 
 UCLASS()
-class BULLETGAME_API UBulletTraceElementPool : public UObject
+class BULLETSYSTEM_API UBulletTraceElementPool : public UObject
 {
     GENERATED_BODY()
 

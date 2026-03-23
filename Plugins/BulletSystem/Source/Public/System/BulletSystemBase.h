@@ -10,7 +10,7 @@
 class UBulletController;
 
 UCLASS(Abstract)
-class BULLETGAME_API UBulletSystemBase : public UObject
+class BULLETSYSTEM_API UBulletSystemBase : public UObject
 {
     GENERATED_BODY()
 

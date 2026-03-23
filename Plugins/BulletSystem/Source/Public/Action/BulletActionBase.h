@@ -12,7 +12,7 @@ class UBulletController;
 struct FBulletInfo;
 
 UCLASS(Abstract)
-class BULLETGAME_API UBulletActionBase : public UObject
+class BULLETSYSTEM_API UBulletActionBase : public UObject
 {
     GENERATED_BODY()
 

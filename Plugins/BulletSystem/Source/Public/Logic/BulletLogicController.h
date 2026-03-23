@@ -15,7 +15,7 @@ struct FBulletInfo;
 struct FHitResult;
 
 UCLASS(Abstract, NotBlueprintable)
-class BULLETGAME_API UBulletLogicController : public UObject
+class BULLETSYSTEM_API UBulletLogicController : public UObject
 {
     GENERATED_BODY()
 

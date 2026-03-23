@@ -11,7 +11,7 @@ class UBulletEntity;
 
 // Base class for bullet entity components to align with the entity-style framework.
 UCLASS(Abstract)
-class BULLETGAME_API UBulletEntityComponent : public UObject
+class BULLETSYSTEM_API UBulletEntityComponent : public UObject
 {
     GENERATED_BODY()
 

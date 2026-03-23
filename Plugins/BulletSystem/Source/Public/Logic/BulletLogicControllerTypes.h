@@ -13,7 +13,7 @@
 class AActor;
 
 UCLASS()
-class BULLETGAME_API UBulletLogicCreateBulletController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicCreateBulletController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -23,7 +23,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicDestroyBulletController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicDestroyBulletController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -33,7 +33,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicForceController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicForceController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -42,7 +42,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicFreezeController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicFreezeController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -51,7 +51,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicReboundController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicReboundController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -60,7 +60,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicSupportController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicSupportController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -69,7 +69,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicCurveMovementController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicCurveMovementController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -78,7 +78,7 @@ public:
 };
 
 UCLASS()
-class BULLETGAME_API UBulletLogicShieldController : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicShieldController : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 
@@ -87,7 +87,7 @@ public:
 };
 
 UCLASS(Blueprintable)
-class BULLETGAME_API UBulletLogicController_ApplyGameplayEffect : public UBulletLogicControllerBlueprintBase
+class BULLETSYSTEM_API UBulletLogicController_ApplyGameplayEffect : public UBulletLogicControllerBlueprintBase
 {
     GENERATED_BODY()
 

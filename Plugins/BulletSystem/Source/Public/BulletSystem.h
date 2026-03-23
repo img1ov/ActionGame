@@ -2,12 +2,12 @@
 
 #pragma once
 
-// BulletSystem: BulletGame.h
+// BulletSystem: BulletSystem.h
 // Module definitions and glue code.
 
 #include "Modules/ModuleManager.h"
 
-class FBulletGameModule : public IModuleInterface
+class FBulletSystemModule : public IModuleInterface
 {
 public:
 

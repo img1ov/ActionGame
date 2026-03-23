@@ -8,7 +8,7 @@
 #include "BulletBudgetComponent.generated.h"
 
 UCLASS()
-class BULLETGAME_API UBulletBudgetComponent : public UBulletEntityComponent
+class BULLETSYSTEM_API UBulletBudgetComponent : public UBulletEntityComponent
 {
     GENERATED_BODY()
 

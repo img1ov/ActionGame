@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // BulletSystem: BulletSystemNotifies.h
 // Native AnimNotifies used to integrate BulletSystem with montage notifies + GAS gameplay events.
@@ -19,7 +19,7 @@ class USkeletalMeshComponent;
  * Used by GA to read notify parameters (BulletId/InitParams/Process/Destroy parameters).
  */
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletNotifyOptionalObject : public UObject
+class BULLETSYSTEM_API UBulletNotifyOptionalObject : public UObject
 {
 	GENERATED_BODY()
 
@@ -44,7 +44,7 @@ public:
  * - Authority/Autonomous: send gameplay event to GA (GA injects payload + spawns authoritative bullet).
  */
 UCLASS(meta = (DisplayName = "Bullet Spawn"))
-class BULLETGAME_API UAN_SpawnBullet : public UAnimNotify
+class BULLETSYSTEM_API UAN_SpawnBullet : public UAnimNotify
 {
 	GENERATED_BODY()
 
@@ -80,7 +80,7 @@ protected:
   * Targets the bullet instance by InstanceKey.
   */
 UCLASS(meta = (DisplayName = "Bullet Process Manual Hits"))
-class BULLETGAME_API UAN_ProcessManualHits : public UAnimNotify
+class BULLETSYSTEM_API UAN_ProcessManualHits : public UAnimNotify
 {
 	GENERATED_BODY()
 
@@ -106,7 +106,7 @@ protected:
   * Targets the bullet instance by InstanceKey.
   */
 UCLASS(meta = (DisplayName = "Bullet Destroy"))
-class BULLETGAME_API UAN_DestroyBullet : public UAnimNotify
+class BULLETSYSTEM_API UAN_DestroyBullet : public UAnimNotify
 {
 	GENERATED_BODY()
 
@@ -129,7 +129,7 @@ protected:
   * If InstanceKey is empty, BulletId will be used as the runtime key (author explicit keys for overlapping windows).
   */
  UCLASS(meta = (DisplayName = "Bullet Spawn (State)"))
-class BULLETGAME_API UANS_SpawnBullet : public UAnimNotifyState
+class BULLETSYSTEM_API UANS_SpawnBullet : public UAnimNotifyState
 {
 	GENERATED_BODY()
 

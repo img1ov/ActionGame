@@ -19,7 +19,7 @@ enum class EBulletRuntimeResetPolicy : uint8
 };
 
 UCLASS(Config = Game, DefaultConfig)
-class BULLETGAME_API UBulletSystemSettings : public UDeveloperSettings
+class BULLETSYSTEM_API UBulletSystemSettings : public UDeveloperSettings
 {
     GENERATED_BODY()
 

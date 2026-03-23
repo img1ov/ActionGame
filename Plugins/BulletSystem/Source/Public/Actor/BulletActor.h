@@ -12,7 +12,7 @@ class UNiagaraComponent;
 class UStaticMeshComponent;
 
 UCLASS()
-class BULLETGAME_API ABulletActor : public AActor
+class BULLETSYSTEM_API ABulletActor : public AActor
 {
     GENERATED_BODY()
 

@@ -35,7 +35,7 @@ enum class EBulletActionRunnerState : uint8
 };
 
 UCLASS()
-class BULLETGAME_API UBulletActionRunner : public UObject
+class BULLETSYSTEM_API UBulletActionRunner : public UObject
 {
     GENERATED_BODY()
 

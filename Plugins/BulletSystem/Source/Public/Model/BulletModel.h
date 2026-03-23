@@ -11,7 +11,7 @@
 class UBulletPool;
 
 UCLASS()
-class BULLETGAME_API UBulletModel : public UObject
+class BULLETSYSTEM_API UBulletModel : public UObject
 {
     GENERATED_BODY()
 

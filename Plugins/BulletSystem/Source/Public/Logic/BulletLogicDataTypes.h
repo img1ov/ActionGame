@@ -11,7 +11,7 @@ class UCurveVector;
 class UGameplayEffect;
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataCreateBullet : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataCreateBullet : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -29,7 +29,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataDestroyBullet : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataDestroyBullet : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -40,7 +40,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataForce : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataForce : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -58,7 +58,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataFreeze : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataFreeze : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -70,7 +70,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataRebound : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataRebound : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -82,7 +82,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataSupport : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataSupport : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -94,7 +94,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataCurveMovement : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataCurveMovement : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -109,7 +109,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicDataShield : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicDataShield : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -124,7 +124,7 @@ public:
 };
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletLogicData_ApplyGameplayEffect : public UBulletLogicData
+class BULLETSYSTEM_API UBulletLogicData_ApplyGameplayEffect : public UBulletLogicData
 {
     GENERATED_BODY()
 
@@ -149,6 +149,6 @@ public:
     // If true, apply the effect to all actors accepted at the bullet's LastHitTime (typically the current frame).
     // This is useful for "single dispatch" damage logic that wants the full hit batch.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
-    bool bApplyToAllHitActorsAtLastHitTime = false;
+    bool bApplyToAllHitActors = false;
 };
 

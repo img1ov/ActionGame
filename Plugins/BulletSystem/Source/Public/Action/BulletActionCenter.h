@@ -22,7 +22,7 @@ struct FBulletActionPool
 };
 
 UCLASS()
-class BULLETGAME_API UBulletActionCenter : public UObject
+class BULLETSYSTEM_API UBulletActionCenter : public UObject
 {
     GENERATED_BODY()
 

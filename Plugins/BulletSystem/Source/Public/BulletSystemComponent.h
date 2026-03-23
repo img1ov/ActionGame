@@ -64,7 +64,7 @@ struct FBulletInstanceRegistry
 };
 
 UCLASS(ClassGroup = (BulletSystem), meta = (BlueprintSpawnableComponent))
-class BULLETGAME_API UBulletSystemComponent : public UActorComponent
+class BULLETSYSTEM_API UBulletSystemComponent : public UActorComponent
 {
 	GENERATED_BODY()
 

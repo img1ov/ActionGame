@@ -14,7 +14,7 @@ class UBulletEntityComponent;
 class ABulletActor;
 
 UCLASS()
-class BULLETGAME_API UBulletEntity : public UObject
+class BULLETSYSTEM_API UBulletEntity : public UObject
 {
     GENERATED_BODY()
 

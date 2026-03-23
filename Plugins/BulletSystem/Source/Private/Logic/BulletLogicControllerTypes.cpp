@@ -288,7 +288,7 @@ void UBulletLogicController_ApplyGameplayEffect::OnHit(FBulletInfo& BulletInfo, 
 
     AActor* SourceActor = BulletInfo.InitParams.Owner;
 
-    if (ApplyData->bApplyToAllHitActorsAtLastHitTime)
+    if (ApplyData->bApplyToAllHitActors)
     {
         const float BatchHitTime = BulletInfo.CollisionInfo.LastHitTime;
         if (FMath::IsNearlyEqual(LastAppliedBatchHitTime, BatchHitTime, 0.001f))

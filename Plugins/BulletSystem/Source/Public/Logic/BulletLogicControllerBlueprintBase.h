@@ -10,7 +10,7 @@
 #include "BulletLogicControllerBlueprintBase.generated.h"
 
 UCLASS(Blueprintable)
-class BULLETGAME_API UBulletLogicControllerBlueprintBase : public UBulletLogicController
+class BULLETSYSTEM_API UBulletLogicControllerBlueprintBase : public UBulletLogicController
 {
     GENERATED_BODY()
 

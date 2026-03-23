@@ -34,7 +34,7 @@ enum class EBulletChildSpawnTrigger : uint8
 };
 
 UCLASS()
-class BULLETGAME_API UBulletController : public UObject
+class BULLETSYSTEM_API UBulletController : public UObject
 {
     GENERATED_BODY()
 

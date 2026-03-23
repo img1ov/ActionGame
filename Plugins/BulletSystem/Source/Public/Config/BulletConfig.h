@@ -9,7 +9,7 @@
 #include "BulletConfig.generated.h"
 
 UCLASS(BlueprintType)
-class BULLETGAME_API UBulletConfig : public UDataAsset
+class BULLETSYSTEM_API UBulletConfig : public UDataAsset
 {
     GENERATED_BODY()
 

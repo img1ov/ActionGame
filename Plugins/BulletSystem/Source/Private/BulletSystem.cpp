@@ -1,17 +1,17 @@
-// BulletSystem: BulletGame.cpp
+// BulletSystem: BulletSystem.cpp
 // Module definitions and glue code.
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "BulletGame.h"
+#include "BulletSystem.h"
 
-#define LOCTEXT_NAMESPACE "FBulletGameModule"
+#define LOCTEXT_NAMESPACE "FBulletSystemModule"
 
-void FBulletGameModule::StartupModule()
+void FBulletSystemModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
 }
 
-void FBulletGameModule::ShutdownModule()
+void FBulletSystemModule::ShutdownModule()
 {
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
@@ -19,5 +19,5 @@ void FBulletGameModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FBulletGameModule, BulletGame)
+IMPLEMENT_MODULE(FBulletSystemModule, BulletSystem)
 

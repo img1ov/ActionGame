@@ -12,7 +12,7 @@
 class AActor;
 
 UCLASS()
-class BULLETGAME_API UBulletSystemBlueprintLibrary : public UBlueprintFunctionLibrary
+class BULLETSYSTEM_API UBulletSystemBlueprintLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 

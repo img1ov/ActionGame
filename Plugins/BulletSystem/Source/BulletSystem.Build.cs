@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class BulletGame : ModuleRules
+public class BulletSystem : ModuleRules
 {
-	public BulletGame(ReadOnlyTargetRules Target) : base(Target)
+	public BulletSystem(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		

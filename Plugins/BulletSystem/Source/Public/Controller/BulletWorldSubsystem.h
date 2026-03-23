@@ -12,7 +12,7 @@ class UBulletController;
 class AActor;
 
 UCLASS()
-class BULLETGAME_API UBulletWorldSubsystem : public UWorldSubsystem, public FTickableGameObject
+class BULLETSYSTEM_API UBulletWorldSubsystem : public UWorldSubsystem, public FTickableGameObject
 {
     GENERATED_BODY()
 

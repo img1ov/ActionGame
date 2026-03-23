@@ -35,7 +35,7 @@ public class ActGame : ModuleRules
                 "GameplayTasks",
                 "GameplayAbilities",
                 "AIModule",
-                "BulletGame",
+                "BulletSystem",
                 "ModularGameplay",
                 "ModularGameplayActors",
                 "DataRegistry",
