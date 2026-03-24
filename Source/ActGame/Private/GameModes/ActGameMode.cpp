@@ -238,6 +238,13 @@ void AActGameMode::HandleStartingNewPlayer_Implementation(APlayerController* New
 	}
 }
 
+void AActGameMode::GenericPlayerInitialization(AController* NewPlayer)
+{
+	Super::GenericPlayerInitialization(NewPlayer);
+	
+	OnGameModePlayerInitialized.Broadcast(this, NewPlayer);
+}
+
 void AActGameMode::InitGameState()
 {
 	Super::InitGameState();

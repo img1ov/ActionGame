@@ -14,6 +14,13 @@ class UActPawnData;
 class UActExperienceDefinition;
 
 /**
+ * Post login event, triggered when a player or bot joins the game as well as after seamless and non seamless travel
+ *
+ * This is called after the player has finished initialization
+ */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnActGameModePlayerInitialized, AGameModeBase* /*GameMode*/, AController* /*NewPlayer*/);
+
+/**
  * AActGameMode
  *
  *	The base game mode class used by this project.
@@ -34,11 +41,17 @@ public:
 	UE_API virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	UE_API virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 	UE_API virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
-	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	UE_API virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	UE_API virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 	UE_API virtual void InitGameState() override;
 	//~End of AGameModeBase interface
+	
+	// Delegate called on player initialization, described above 
+	FOnActGameModePlayerInitialized OnGameModePlayerInitialized;
+
 
 protected:
+	
 	UE_API void OnExperienceLoaded(const UActExperienceDefinition* CurrentExperience);
 	UE_API bool IsExperienceLoaded() const;
 	

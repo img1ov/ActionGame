@@ -59,6 +59,22 @@ public:
 	UE_API virtual FGenericTeamId GetGenericTeamId() const override;
 	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
 	//~End of IActTeamAgentInterface interface
+	
+	/** Returns the Squad ID of the squad the player belongs to. */
+	UFUNCTION(BlueprintCallable)
+	int32 GetSquadId() const
+	{
+		return MySquadID;
+	}
+	
+	/** Returns the Team ID of the team the player belongs to. */
+	UFUNCTION(BlueprintCallable)
+	int32 GetTeamId() const
+	{
+		return GenericTeamIdToInteger(MyTeamID);
+	}
+
+	UE_API void SetSquadID(int32 NewSquadID);
 
 protected:
 	
@@ -88,16 +104,22 @@ private:
 	UPROPERTY()
 	TObjectPtr<const class UActCombatSet> CombatSet;
 	
+	UPROPERTY()
+	FOnActTeamIndexChangedDelegate OnTeamChangedDelegate;
+	
 	UPROPERTY(ReplicatedUsing=OnRep_MyTeamID)
 	FGenericTeamId MyTeamID;
 	
-	UPROPERTY()
-	FOnActTeamIndexChangedDelegate OnTeamChangedDelegate;
+	UPROPERTY(ReplicatedUsing=OnRep_MySquadID)
+	int32 MySquadID;
 	
 private:
 	
 	UFUNCTION()
 	UE_API void OnRep_MyTeamID(FGenericTeamId OldTeamID);
+	
+	UFUNCTION()
+	UE_API void OnRep_MySquadID();
 	
 };
 

@@ -5,6 +5,8 @@
 
 #include "AbilitySystem/ActGameplayEffectContext.h"
 #include "AbilitySystem/Attributes/ActCombatSet.h"
+#include "AbilitySystem/Attributes/ActHealthSet.h"
+#include "Teams/ActTeamSubsystem.h"
 
 struct FDamageStatics
 {
@@ -46,7 +48,41 @@ void UActDamageExecution::Execute_Implementation(const FGameplayEffectCustomExec
 	ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(DamageStatics().BaseDamageDef, EvaluateParameters, BaseDamage);
 	
 	const AActor* EffectCauser = TypedContext->GetEffectCauser();
+	const FHitResult* HitActorResult = TypedContext->GetHitResult();
+
+	const AActor* HitActor = nullptr;
 	
+	if (HitActorResult)
+	{
+		const FHitResult& CurHitResult = *HitActorResult;
+		HitActor = CurHitResult.HitObjectHandle.FetchActor();
+	}
+	
+	// Handle case of no hit result or hit result not actually returning an actor
+	UAbilitySystemComponent* TargetAbilitySystemComponent = ExecutionParams.GetTargetAbilitySystemComponent();
+	if (!HitActor)
+	{
+		HitActor = TargetAbilitySystemComponent ? TargetAbilitySystemComponent->GetAvatarActor_Direct() : nullptr;
+	}
+	
+	float DamageInteractionAllowedMultiplier = 0.0f;
+	if (HitActor)
+	{
+		UActTeamSubsystem* TeamSubsystem = HitActor->GetWorld()->GetSubsystem<UActTeamSubsystem>();
+		if (ensure(TeamSubsystem))
+		{
+			DamageInteractionAllowedMultiplier = TeamSubsystem->CanCauseDamage(EffectCauser, HitActor) ? 1.0 : 0.0;
+		}
+	}
+	
+	// Clamping is done when damage is converted to -health
+	const float DamageDone = FMath::Max(BaseDamage * DamageInteractionAllowedMultiplier, 0.0f);
+
+	if (DamageDone > 0.0f)
+	{
+		// Apply a damage modifier, this gets turned into - health on the target
+		OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(UActHealthSet::GetDamageAttribute(), EGameplayModOp::Additive, DamageDone));
+	}
 	
 #endif // #if WITH_SERVER_CODE
 }

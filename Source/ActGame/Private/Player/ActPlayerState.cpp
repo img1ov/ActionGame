@@ -34,6 +34,7 @@ AActPlayerState::AActPlayerState(const FObjectInitializer& ObjectInitializer)
 	SetNetUpdateFrequency(100.0f);
 	
 	MyTeamID = FGenericTeamId::NoTeam;
+	MySquadID = INDEX_NONE;
 }
 
 AActPlayerController* AActPlayerState::GetActPlayerController() const
@@ -135,6 +136,17 @@ void AActPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, PawnData, SharedParams);
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, MyTeamID, SharedParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, MySquadID, SharedParams);
+}
+
+void AActPlayerState::SetSquadID(int32 NewSquadID)
+{
+	if (HasAuthority())
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(ThisClass, MySquadID, this);
+
+		MySquadID = NewSquadID;
+	}
 }
 
 void AActPlayerState::OnRep_PawnData()
@@ -159,4 +171,9 @@ void AActPlayerState::OnExperienceLoaded(const UActExperienceDefinition* Current
 void AActPlayerState::OnRep_MyTeamID(FGenericTeamId OldTeamID)
 {
 	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
+}
+
+void AActPlayerState::OnRep_MySquadID()
+{
+	//@TODO: Let the squad subsystem know (once that exists)
 }
