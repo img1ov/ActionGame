@@ -8,6 +8,8 @@
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Player/ActPlayerState.h"
 
+#include UE_INLINE_GENERATED_CPP_BY_NAME(ActPlayerController)
+
 AActPlayerController::AActPlayerController(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {

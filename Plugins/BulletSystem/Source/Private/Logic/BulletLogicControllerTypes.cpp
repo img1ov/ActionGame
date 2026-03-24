@@ -6,9 +6,11 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "Actor/BulletActor.h"
 #include "Controller/BulletController.h"
 #include "Entity/BulletEntity.h"
+#include "Logic/HitReactOptional.h"
 #include "Model/BulletInfo.h"
 
 class UAbilitySystemComponent;
@@ -211,11 +213,11 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
         Context.AddSourceObject(BulletInfo.Entity.Get());
     }
 
-    FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(ApplyData->GameplayEffect, ApplyData->EffectLevel, Context);
-    if (!SpecHandle.IsValid() || !SpecHandle.Data.IsValid())
-    {
-        return false;
-    }
+	FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(ApplyData->GameplayEffect, ApplyData->EffectLevel, Context);
+	if (!SpecHandle.IsValid() || !SpecHandle.Data.IsValid())
+	{
+		return false;
+	}
 
     for (const TPair<FName, float>& Pair : BulletInfo.InitParams.Payload.SetByCallerNameMagnitudes)
     {
@@ -233,13 +235,46 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
         }
     }
 
-    if (!ApplyData->DynamicGrantedTags.IsEmpty())
-    {
-        SpecHandle.Data->DynamicGrantedTags.AppendTags(ApplyData->DynamicGrantedTags);
-    }
+	if (!ApplyData->DynamicGrantedTags.IsEmpty())
+	{
+		SpecHandle.Data->DynamicGrantedTags.AppendTags(ApplyData->DynamicGrantedTags);
+	}
 
-    const FActiveGameplayEffectHandle ActiveHandle = SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-    return ActiveHandle.IsValid();
+	const FActiveGameplayEffectHandle ActiveHandle = SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+	bool bAttemptedApply = ActiveHandle.IsValid();
+
+	// Optional: fire a gameplay event to drive hit-react abilities using EventData + EffectContext.
+	// Note: We intentionally keep this server-driven for stability.
+	if (ApplyData->bApplyHitReact)
+	{
+		if (UWorld* World = Controller ? Controller->GetWorld() : nullptr)
+		{
+			if (!World->IsNetMode(NM_Client))
+			{
+				const FHitReactImpulse& HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
+				if (HitReactImpulse.HitReactTag.IsValid())
+				{
+					UHitReactOptional* Optional = NewObject<UHitReactOptional>(TargetASC);
+					Optional->HitReactImpulse = HitReactImpulse;
+
+					FGameplayEventData EventData;
+					EventData.EventTag = HitReactImpulse.HitReactTag;
+					EventData.Instigator = SourceActor;
+					EventData.Target = TargetActor;
+					EventData.OptionalObject = Optional;
+					EventData.ContextHandle = SpecHandle.Data->GetContext();
+					EventData.EventMagnitude = HitReactImpulse.Strength;
+
+					if (TargetASC->HandleGameplayEvent(EventData.EventTag, &EventData))
+					{
+					    bAttemptedApply = true;
+					}
+				}
+			}
+		}
+	}
+
+	return bAttemptedApply;
 }
 
 FHitResult UBulletLogicController_ApplyGameplayEffect::BuildBestEffortHitForTarget(const FBulletInfo& BulletInfo, const FHitResult& FallbackHit, AActor* TargetActor)

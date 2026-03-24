@@ -106,6 +106,24 @@ enum class EBulletHitTrigger : uint8
 };
 
 USTRUCT(BlueprintType)
+struct FHitReactImpulse
+{
+    GENERATED_BODY()
+
+    // GameplayEvent tag that drives GA_HitReact (ability should be triggered by this event tag).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    FGameplayTag HitReactTag;
+
+    // Impulse direction/amount. Interpretation is up to the target hit-react blueprint/GA.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    FVector ImpulseVector = FVector::ZeroVector;
+
+    // Primary strength used for scaling / montage selection / convenience (also mirrored into EventData.EventMagnitude).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    float Strength = 0.0f;
+};
+
+USTRUCT(BlueprintType)
 struct FBulletPayload
 {
     GENERATED_BODY()
@@ -116,6 +134,11 @@ struct FBulletPayload
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault))
     TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
+
+    // Optional hit-react payload injected at spawn time (typically via AnimNotify/GA).
+    // If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, this will be forwarded to the target ASC via GameplayEventData.OptionalObject.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault))
+    FHitReactImpulse HitReactImpulse;
 };
 
 USTRUCT(BlueprintType)

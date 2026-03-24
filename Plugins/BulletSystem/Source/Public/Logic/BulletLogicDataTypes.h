@@ -146,9 +146,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
     FGameplayTagContainer DynamicGrantedTags;
 
-    // If true, apply the effect to all actors accepted at the bullet's LastHitTime (typically the current frame).
-    // This is useful for "single dispatch" damage logic that wants the full hit batch.
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
-    bool bApplyToAllHitActors = false;
-};
+	// If true, apply the effect to all actors accepted at the bullet's LastHitTime (typically the current frame).
+	// This is useful for "single dispatch" damage logic that wants the full hit batch.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
+	bool bApplyToAllHitActors = false;
 
+	// If true, dispatch a gameplay event to the target ASC after the GE is applied successfully.
+	// This is the most stable way to trigger hit-react abilities while carrying EventData + EffectContext (HitResult, instigator/causer, etc).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HitReact")
+	bool bApplyHitReact = false;
+};

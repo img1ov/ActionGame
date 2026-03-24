@@ -154,14 +154,6 @@ bool FActCommandRuntimeResolver::TryExecuteCommand(UActAbilitySystemComponent& A
 			return false;
 		}
 
-		const UActGameplayAbility* CachedAbilityCDO = Cast<UActGameplayAbility>(CachedSpec->Ability);
-		const FName CachedAbilityId = CachedAbilityCDO ? CachedAbilityCDO->GetAbilityID() : NAME_None;
-
-		auto IsEntrySameAsCached = [CachedAbilityId](const FActAbilityChainRuntimeEntry& RuntimeEntry) -> bool
-		{
-			return !CachedAbilityId.IsNone() && CachedAbilityId == RuntimeEntry.AbilityID;
-		};
-
 		// Prefer higher priority when multiple entries match the same command.
 		// Tie-breaker keeps the old behavior: later (more recently registered) entries win.
 		struct FCandidate
@@ -174,14 +166,9 @@ bool FActCommandRuntimeResolver::TryExecuteCommand(UActAbilitySystemComponent& A
 		Candidates.Reserve(RuntimeEntries->Num());
 		for (int32 Index = 0; Index < RuntimeEntries->Num(); ++Index)
 		{
-			const FActAbilityChainRuntimeEntry& RuntimeEntry = (*RuntimeEntries)[Index];
-			if (IsEntrySameAsCached(RuntimeEntry))
-			{
-				continue;
-			}
 			FCandidate Candidate;
 			Candidate.Index = Index;
-			Candidate.Priority = RuntimeEntry.Priority;
+			Candidate.Priority = (*RuntimeEntries)[Index].Priority;
 			Candidates.Add(Candidate);
 		}
 
@@ -198,6 +185,9 @@ bool FActCommandRuntimeResolver::TryExecuteCommand(UActAbilitySystemComponent& A
 		{
 			const FActAbilityChainRuntimeEntry& RuntimeEntry = (*RuntimeEntries)[Candidate.Index];
 
+			// Note: We intentionally do not cancel the currently active cached ability here.
+			// If the best match resolves to the same ability, retrigger behavior (if desired)
+			// should be authored on the ability asset itself (e.g. bRetriggerInstancedAbility).
 			FGameplayAbilitySpecHandle ActivatedSpecHandle;
 			if (!ActASC.TryActivateAbilityByID(
 				RuntimeEntry.AbilityID,
@@ -211,47 +201,6 @@ bool FActCommandRuntimeResolver::TryExecuteCommand(UActAbilitySystemComponent& A
 			CachedAbilityHandle = ActivatedSpecHandle;
 			ClearAbilityChainWindows();
 			return true;
-		}
-
-		// Only when the derived entry matches the cached ability itself do we cancel + replay.
-		int32 BestReplayIndex = INDEX_NONE;
-		int32 BestReplayPriority = MIN_int32;
-		for (int32 Index = 0; Index < RuntimeEntries->Num(); ++Index)
-		{
-			const FActAbilityChainRuntimeEntry& RuntimeEntry = (*RuntimeEntries)[Index];
-			if (!IsEntrySameAsCached(RuntimeEntry))
-			{
-				continue;
-			}
-
-			if (RuntimeEntry.Priority > BestReplayPriority ||
-				(RuntimeEntry.Priority == BestReplayPriority && Index > BestReplayIndex))
-			{
-				BestReplayPriority = RuntimeEntry.Priority;
-				BestReplayIndex = Index;
-			}
-		}
-
-		if (BestReplayIndex != INDEX_NONE)
-		{
-			const FActAbilityChainRuntimeEntry& RuntimeEntry = (*RuntimeEntries)[BestReplayIndex];
-
-			if (CachedSpec->IsActive())
-			{
-				ActASC.CancelAbilityByHandle(CachedAbilityHandle);
-			}
-
-			FGameplayAbilitySpecHandle ActivatedSpecHandle;
-			if (ActASC.TryActivateAbilityByID(
-				RuntimeEntry.AbilityID,
-				/*bAllowRemoteActivation=*/true,
-				/*bCancelIfAlreadyActive=*/false,
-				&ActivatedSpecHandle))
-			{
-				CachedAbilityHandle = ActivatedSpecHandle;
-				ClearAbilityChainWindows();
-				return true;
-			}
 		}
 
 		return false;

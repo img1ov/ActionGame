@@ -15,7 +15,8 @@
 				"GameplayAbilities",
 				"AIModule",
 				"StateTreeModule",
-				"GameplayStateTreeModule"
+				"GameplayStateTreeModule",
+				"DeveloperSettings"
 			]
 		}
 	],

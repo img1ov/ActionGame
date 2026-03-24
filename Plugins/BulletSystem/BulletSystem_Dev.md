@@ -11,6 +11,29 @@
 - `InstanceKey`：运行时句柄（名字）。用于在 AnimNotify/蓝图里跨时机找回 `InstanceId`，本质是 `Key -> InstanceId` 的本地映射表。
 - `Payload`：每次 Spawn 携带的 SetByCaller 数值，用于命中时注入到 GE（或你自己的逻辑里读取）。
 
+## 1.1 HitReact（最稳：GameplayEvent 驱动 GA）
+
+如果你希望做“类 DMC5 的受击表现”（击退/击飞/硬直/浮空等），推荐让子弹命中后在服务器侧：
+
+1. 先 Apply 伤害/状态 GE（数值与规则）
+2. 再对目标 ASC 发送 `GameplayEvent`（动作与表现），由 `GA_HitReact` 使用 `ActivateAbilityFromEvent` 接收 `EventData`
+
+BulletSystem 已在 `UBulletLogicData_ApplyGameplayEffect` 提供可选开关：
+
+- `bApplyHitReact`
+
+`HitReactImpulse` 的来源：
+
+- 推荐：在 `UAN_SpawnBullet` / `UANS_SpawnBullet` 的 `HitReactImpulse` 字段里配置（spawn 前注入到 `InitParams.Payload`）
+- 或者：在你的 GA 收到 SpawnEvent 后，修改 `OptionalObject->InitParams.Payload.HitReactImpulse` 再 spawn（同样会随子弹实例携带到命中逻辑）
+
+运行时规则：当 GE 成功应用到目标后，如果 `InitParams.Payload.HitReactImpulse.HitReactTag` 有效，则会调用 `TargetASC->HandleGameplayEvent(HitReactTag, EventData)`：
+
+- `EventData.EventTag`：`HitReactImpulse.HitReactTag`
+- `EventData.EventMagnitude`：`HitReactImpulse.Strength`
+- `EventData.OptionalObject`：`UHitReactOptional`（GA 蓝图里 Cast 后读取 `HitReactImpulse`）
+- `EventData.ContextHandle`：同一份 `EffectContextHandle`（包含 HitResult/Instigator/Causer/SourceObject 等）
+
 ## 2. 配置准备（DataTable + UBulletConfig）
 
 1. 创建一张 DataTable，RowStruct 选择 `FBulletDataMain`。

@@ -63,6 +63,7 @@ void UAN_SpawnBullet::OnNotify_Implementation(USkeletalMeshComponent* MeshComp, 
 		InitParams.SpawnTransform = MeshComp ? MeshComp->GetComponentTransform() : OwnerActor->GetActorTransform();
 	}
 	InitParams.InstanceKey = Key;
+	InitParams.Payload.HitReactImpulse = HitReactImpulse;
 
 	if (OwnerActor->GetLocalRole() == ROLE_SimulatedProxy)
 	{
@@ -310,6 +311,7 @@ void UANS_SpawnBullet::OnBegin_Implementation(USkeletalMeshComponent* MeshComp, 
 		InitParams.SpawnTransform = MeshComp ? MeshComp->GetComponentTransform() : OwnerActor->GetActorTransform();
 	}
 	InitParams.InstanceKey = Key;
+	InitParams.Payload.HitReactImpulse = HitReactImpulse;
 
 	if (OwnerActor->GetLocalRole() == ROLE_SimulatedProxy)
 	{

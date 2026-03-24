@@ -60,6 +60,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName SpawnSocketName = NAME_None;
 
+	// Optional hit-react impulse payload injected into InitParams.Payload for this bullet spawn.
+	// If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, the hit target will receive this via GameplayEventData.OptionalObject.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|HitReact")
+	FHitReactImpulse HitReactImpulse;
+
 	/** GameplayEvent tag routed to GA on Authority/Autonomous. If invalid, spawns locally instead. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag SpawnEventTag;
@@ -142,6 +147,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName SpawnSocketName = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|HitReact")
+	FHitReactImpulse HitReactImpulse;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag SpawnEventTag;
