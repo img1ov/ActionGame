@@ -13,8 +13,11 @@
 #include "GameModes/ActWorldSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Player/ActPlayerController.h"
+#include "Player/ActPlayerSpawningManagerComponent.h"
 #include "Player/ActPlayerState.h"
 #include "System/ActAssetManager.h"
+
+class UActPlayerSpawningManagerComponent;
 
 AActGameMode::AActGameMode(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -238,6 +241,16 @@ void AActGameMode::HandleStartingNewPlayer_Implementation(APlayerController* New
 	}
 }
 
+AActor* AActGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	if (UActPlayerSpawningManagerComponent* PlayerSpawningComponent = GameState->FindComponentByClass<UActPlayerSpawningManagerComponent>())
+	{
+		return PlayerSpawningComponent->ChoosePlayerStart(Player);
+	}
+	
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
 void AActGameMode::GenericPlayerInitialization(AController* NewPlayer)
 {
 	Super::GenericPlayerInitialization(NewPlayer);
@@ -253,6 +266,32 @@ void AActGameMode::InitGameState()
 	UActExperienceManagerComponent* ExperienceComponent = GameState->FindComponentByClass<UActExperienceManagerComponent>();
 	check(ExperienceComponent);
 	ExperienceComponent->CallOrRegister_OnExperienceLoaded(FOnActExperienceLoaded::FDelegate::CreateUObject(this, &ThisClass::OnExperienceLoaded));
+}
+
+bool AActGameMode::ControllerCanRestart(AController* Controller)
+{
+	if (APlayerController* PC = Cast<APlayerController>(Controller))
+	{	
+		if (!Super::PlayerCanRestart_Implementation(PC))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// Bot version of Super::PlayerCanRestart_Implementation
+		if ((Controller == nullptr) || Controller->IsPendingKillPending())
+		{
+			return false;
+		}
+	}
+
+	if (UActPlayerSpawningManagerComponent* PlayerSpawningComponent = GameState->FindComponentByClass<UActPlayerSpawningManagerComponent>())
+	{
+		return PlayerSpawningComponent->ControllerCanRestart(Controller);
+	}
+
+	return true;
 }
 
 void AActGameMode::OnExperienceLoaded(const UActExperienceDefinition* CurrentExperience)

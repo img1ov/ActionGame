@@ -42,9 +42,13 @@ public:
 	UE_API virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 	UE_API virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
 	UE_API virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	UE_API virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 	UE_API virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 	UE_API virtual void InitGameState() override;
 	//~End of AGameModeBase interface
+	
+	// Agnostic version of PlayerCanRestart that can be used for both player bots and players
+	UE_API virtual bool ControllerCanRestart(AController* Controller);
 	
 	// Delegate called on player initialization, described above 
 	FOnActGameModePlayerInitialized OnGameModePlayerInitialized;

@@ -1,50 +1,102 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
-#include "ModularGameState.h"
 #include "AbilitySystemInterface.h"
+#include "ModularGameState.h"
 
 #include "ActGameState.generated.h"
 
+#define UE_API ACTGAME_API
+
+struct FActVerbMessage;
+
+class APlayerState;
+class UAbilitySystemComponent;
 class UActAbilitySystemComponent;
 class UActExperienceManagerComponent;
 class UObject;
 struct FFrame;
 
 /**
- * 
+ * AActGameState
+ *
+ *	The base game state class used by this project.
  */
-UCLASS()
-class ACTGAME_API AActGameState : public AModularGameStateBase, public IAbilitySystemInterface
+UCLASS(MinimalAPI, Config = Game)
+class AActGameState : public AModularGameStateBase, public IAbilitySystemInterface
 {
 	GENERATED_BODY()
 
 public:
-	AActGameState(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	UE_API AActGameState(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	//~AActor interface
-	virtual void Tick(float DeltaSeconds) override;
+	UE_API virtual void PreInitializeComponents() override;
+	UE_API virtual void PostInitializeComponents() override;
+	UE_API virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	UE_API virtual void Tick(float DeltaSeconds) override;
 	//~End of AActor interface
 
-	// Gets the server's FPS, replicated to clients
-	float GetServerFPS() const;
+	//~AGameStateBase interface
+	UE_API virtual void AddPlayerState(APlayerState* PlayerState) override;
+	UE_API virtual void RemovePlayerState(APlayerState* PlayerState) override;
+	UE_API virtual void SeamlessTravelTransitionCheckpoint(bool bToTransitionMap) override;
+	//~End of AGameStateBase interface
 
 	//~IAbilitySystemInterface
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+	UE_API virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	//~End of IAbilitySystemInterface
 
+	// Gets the ability system component used for game wide things
 	UFUNCTION(BlueprintCallable, Category = "Act|GameState")
 	UActAbilitySystemComponent* GetActAbilitySystemComponent() const { return AbilitySystemComponent; }
+
+	// Send a message that all clients will (probably) get
+	// (use only for client notifications like eliminations, server join messages, etc... that can handle being lost)
+	UFUNCTION(NetMulticast, Unreliable, BlueprintCallable, Category = "Act|GameState")
+	UE_API void MulticastMessageToClients(const FActVerbMessage Message);
+
+	// Send a message that all clients will be guaranteed to get
+	// (use only for client notifications that cannot handle being lost)
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable, Category = "Act|GameState")
+	UE_API void MulticastReliableMessageToClients(const FActVerbMessage Message);
+
+	// Gets the server's FPS, replicated to clients
+	UE_API float GetServerFPS() const;
+
+	// Indicate the local player state is recording a replay
+	UE_API void SetRecorderPlayerState(APlayerState* NewPlayerState);
+
+	// Gets the player state that recorded the replay, if valid
+	UE_API APlayerState* GetRecorderPlayerState() const;
+
+	// Delegate called when the replay player state changes
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnRecorderPlayerStateChanged, APlayerState*);
+	FOnRecorderPlayerStateChanged OnRecorderPlayerStateChangedEvent;
+
+private:
+	// Handles loading and managing the current gameplay experience
+	UPROPERTY()
+	TObjectPtr<UActExperienceManagerComponent> ExperienceManagerComponent;
+
+	// The ability system component subobject for game-wide things (primarily gameplay cues)
+	UPROPERTY(VisibleAnywhere, Category = "Act|GameState")
+	TObjectPtr<UActAbilitySystemComponent> AbilitySystemComponent;
 
 protected:
 	UPROPERTY(Replicated)
 	float ServerFPS;
-	
-private:
-	UPROPERTY()
-	TObjectPtr<UActExperienceManagerComponent> ExperienceManagerComponent;
 
-	UPROPERTY(VisibleAnywhere, Category = "Act|GameState")
-	TObjectPtr<UActAbilitySystemComponent> AbilitySystemComponent;
+	// The player state that recorded a replay, it is used to select the right pawn to follow
+	// This is only set in replay streams and is not replicated normally
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_RecorderPlayerState)
+	TObjectPtr<APlayerState> RecorderPlayerState;
+
+	UFUNCTION()
+	UE_API void OnRep_RecorderPlayerState();
+
 };
+
+#undef UE_API
