@@ -1,15 +1,17 @@
 ﻿﻿# BulletSystem 使用教程
 
-本文是面向项目落地的使用说明，按 "把系统跑起来" 的顺序写。实现细节与架构分层请看 `BulletSystem_Design.md`。
+本文是面向项目落地的使用说明，按 "把系统跑起来" 的顺序写。实现细节与架构分层请看本文下半部分的「BulletSystem 模块设计详解」。
 
 ## 1. 你会用到的几个概念
 
 - `BulletId`：配置表里的一行子弹配置的主键。
 - `UBulletConfig`：配置资产，聚合若干张 DataTable 和少量 Inline 行，运行时提供 `BulletId -> FBulletDataMain` 查表能力。
-- `FBulletInitParams`：一次 Spawn 的输入参数。当前约定：`SpawnTransform` 必须由调用方提供，系统不做 Owner 兜底。
+- `FBulletInitParams`：一次 Spawn 的输入参数。建议由调用方显式提供 `SpawnTransform`（AnimNotify 会自动用 Socket/MeshTransform 兜底）。
 - `InstanceId`：运行时子弹实例 id，用于后续操作（手动结算/销毁/开关碰撞等）。
 - `InstanceKey`：运行时句柄（名字）。用于在 AnimNotify/蓝图里跨时机找回 `InstanceId`，本质是 `Key -> InstanceId` 的本地映射表。
 - `Payload`：每次 Spawn 携带的 SetByCaller 数值，用于命中时注入到 GE（或你自己的逻辑里读取）。
+- `ConfigProfile`：编辑器侧的便捷预设（`HitBox/Projectile/Custom`），用于自动填一组常用默认值（仍可按需覆盖）。
+- `BulletSystemSettings`：开发者设置（默认渲染 Actor、debug draw、初始容量、PIE 重置策略等）。
 
 ## 1.1 HitReact（最稳：GameplayEvent 驱动 GA）
 
@@ -27,7 +29,7 @@ BulletSystem 已在 `UBulletLogicData_ApplyGameplayEffect` 提供可选开关：
 - 推荐：在 `UAN_SpawnBullet` / `UANS_SpawnBullet` 的 `HitReactImpulse` 字段里配置（spawn 前注入到 `InitParams.Payload`）
 - 或者：在你的 GA 收到 SpawnEvent 后，修改 `OptionalObject->InitParams.Payload.HitReactImpulse` 再 spawn（同样会随子弹实例携带到命中逻辑）
 
-运行时规则：当 GE 成功应用到目标后，如果 `InitParams.Payload.HitReactImpulse.HitReactTag` 有效，则会调用 `TargetASC->HandleGameplayEvent(HitReactTag, EventData)`：
+运行时规则：当 `UBulletLogicData_ApplyGameplayEffect.bApplyHitReact` 启用且在服务器侧（非 `NM_Client`）命中时，如果 `InitParams.Payload.HitReactImpulse.HitReactTag` 有效，则会调用 `TargetASC->HandleGameplayEvent(HitReactTag, EventData)`：
 
 - `EventData.EventTag`：`HitReactImpulse.HitReactTag`
 - `EventData.EventMagnitude`：`HitReactImpulse.Strength`
@@ -79,8 +81,9 @@ BulletSystem 的仿真是 World 级别的（`UBulletWorldSubsystem/UBulletContro
 
 - `GetInstanceIdByKey`：返回“最近一次 Spawn 且仍有效”的 `InstanceId`
 - 原生 Destroy Notify：会按“最早 Spawn”的顺序依次 Destroy（避免重叠窗口误删新实例）
+- 如需自行实现“End/Destroy 消费最早实例”的语义，可用：`UBulletSystemBlueprintLibrary::ConsumeOldestInstanceIdByKey(SourceActor, InstanceKey)`
 
-## 5. Manual HitBox（重叠采集 + 攻击帧结算）
+## 5. Manual HitBox（手动查询 + 攻击帧结算）
 
 当 `Base.HitTrigger=Manual` 时，CollisionSystem 不会为该 bullet 做每帧碰撞查询；只有当你在攻击帧调用 `ProcessManualHits` 时，系统才会做一次碰撞查询并派发 OnHit 逻辑链。
 
@@ -94,12 +97,13 @@ BulletSystem 的仿真是 World 级别的（`UBulletWorldSubsystem/UBulletContro
 
 ## 6. 销毁语义（统一：帧末回收）
 
-销毁只有两种来源：
+销毁常见来源：
 
 - 显式调用 Destroy（例如 NotifyEnd、技能结束）
+- 命中触发的销毁（`Base.bDestroyOnHit` / `Base.MaxHitCount` / `Base.CollisionResponse` 等）
 - LifeTime 到期（系统 Tick 到期后走同一路径）
 
-两者都会走 `RequestDestroyBullet(InstanceId)` 标记销毁，真实回收在帧末 `FlushDestroyedBullets()` 统一完成，避免在高频迭代中直接移除导致不稳定。
+这些路径都会走 `RequestDestroyBullet(InstanceId)` 标记销毁，真实回收在帧末 `FlushDestroyedBullets()` 统一完成，避免在高频迭代中直接移除导致不稳定。
 
 ## 7. 特效是否跟随子弹
 
@@ -132,6 +136,14 @@ BulletSystem 的仿真是 World 级别的（`UBulletWorldSubsystem/UBulletContro
 2. HitBox 的攻击帧放 `UAN_ProcessManualHits`，使用同一个 `InstanceKey`。
 3. 窗口结束用 `UAN_DestroyBullet` 或 `UANS_SpawnBullet` 的 End 自动 Destroy。
 
+补充规则（按当前实现）：
+
+- `UAN_SpawnBullet` / `UANS_SpawnBullet`：若 `InstanceKey` 为空，会自动回退为 `BulletId` 作为 Key（简单场景开箱即用；重叠窗口建议显式 Key）。
+- 这些 Notify 默认 `bIsNativeBranchingPoint=true`（用于 Montage 时避免服务器侧漏掉单帧 Notify）。
+- SimulatedProxy：Spawn notify 会本地 Spawn 用于表现；若 `bForceCollisionOnSimProxy=true`（默认），会强制开启碰撞以驱动本地命中特效等视觉反馈。
+- `UAN_ProcessManualHits`：SimulatedProxy 使用 `GetInstanceIdByKey`（最新实例）进行本地手动结算；Authority/Autonomous 可通过 `EventTag` 路由到 GA（未配置则本地处理）。
+- `UAN_DestroyBullet` / `UANS_SpawnBullet.End`：使用 `ConsumeOldestInstanceIdByKey`（最早实例）进行销毁，避免重叠窗口误删最新实例；同样可用 `EventTag/EndEventTag` 路由到 GA。
+
 ## 9. GAS 推荐链路（只讲最短必需点）
 
 联机下推荐让 Authority 的真实 Spawn 发生在 GA 中：
@@ -149,11 +161,11 @@ BulletSystem 的仿真是 World 级别的（`UBulletWorldSubsystem/UBulletContro
 - 同一个窗口找不到 Instance：确认 `InitParams.InstanceKey` 与后续查询用的是同一个 Key。
 - PIE 修改配置不生效：可调用 `UBulletSystemBlueprintLibrary::ClearBulletSystemRuntime(WorldContext, true)` 清掉世界内缓存并重建运行时表。
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+---
 
 # BulletSystem 模块设计详解
 
-另见：`BulletSystem_Usage.md`（面向落地的使用教程）
+另见：本文上半部分「BulletSystem 使用教程」
 
 > 面向实现与维护的工程说明，聚焦架构分层、运行流程、扩展点与性能策略。
 
