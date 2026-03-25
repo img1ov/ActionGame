@@ -78,6 +78,15 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             continue;
         }
 
+        if (Info.Config.Base.HitTrigger == EBulletHitTrigger::Manual)
+        {
+            // Manual hitboxes are evaluated only when gameplay explicitly calls ProcessManualHits.
+            // Keeping collision queries out of the per-frame system avoids stale caches and duplicated logic paths.
+            Info.CollisionInfo.bHitThisFrame = false;
+            Info.CollisionInfo.OverlapActors.Reset();
+            continue;
+        }
+
         float RawDelta = DeltaSeconds;
         if (Info.Entity && Info.Entity->GetBudgetComponent())
         {
@@ -132,7 +141,6 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         bool bHit = false;
 
         const ECollisionChannel Channel = Info.Config.Base.CollisionChannel;
-        const bool bManualHit = Info.Config.Base.HitTrigger == EBulletHitTrigger::Manual;
         const bool bOverlapMode = Info.Config.Base.CollisionMode == EBulletCollisionMode::Overlap;
         const float HitInterval = Info.Config.Base.HitInterval;
 
@@ -154,6 +162,15 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             if (const bool bObstacleHit = World->SweepSingleByChannel(ObstacleHit, Info.MoveInfo.LastLocation, Info.MoveInfo.Location, FQuat::Identity, ECC_WorldStatic, FCollisionShape::MakeSphere(ObstacleRadius), QueryParams))
             {
                 UE_LOG(LogBullet, Verbose, TEXT("Obstacle hit: InstanceId=%d"), Info.InstanceId);
+                // Treat obstacle hits as their own batch so batch-based OnHit logic doesn't see stale actors from a previous tick.
+                Info.CollisionInfo.LastHitTime = WorldTime;
+                Info.CollisionInfo.bHitThisFrame = true;
+                Info.CollisionInfo.LastHitBatchId++;
+                Info.CollisionInfo.LastBatchHitActors.Reset();
+                if (AActor* ObstacleActor = ObstacleHit.GetActor())
+                {
+                    Info.CollisionInfo.LastBatchHitActors.Add(ObstacleActor);
+                }
                 const bool bDestroyed = Controller->HandleHitResult(Info, ObstacleHit.GetActor(), ObstacleHit, true);
                 if (bDestroyed)
                 {
@@ -314,66 +331,105 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             }
             #endif
 
-            if (!bManualHit)
+            // EachFrame: allow logic to inspect the collision batch before we dispatch per-actor hit callbacks.
+            if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
             {
-                // Auto-hit: allow logic to inspect the collision batch before we dispatch per-actor hit callbacks.
-                if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
+                Info.Entity->GetLogicComponent()->HandlePreCollision(Info, Hits);
+            }
+
+            struct FPendingAutoHit
+            {
+                AActor* Actor = nullptr;
+                FHitResult Hit;
+            };
+
+            // Phase 1: gather accepted hits (interval gated + FilterHit), without running OnHit controllers yet.
+            TArray<FPendingAutoHit> Pending;
+            Pending.Reserve(Info.CollisionInfo.OverlapActors.Num());
+            for (const TWeakObjectPtr<AActor>& ActorPtr : Info.CollisionInfo.OverlapActors)
+            {
+                AActor* HitActor = ActorPtr.Get();
+                if (!HitActor)
                 {
-                    Info.Entity->GetLogicComponent()->HandlePreCollision(Info, Hits);
+                    continue;
                 }
 
-                for (const TWeakObjectPtr<AActor>& ActorPtr : Info.CollisionInfo.OverlapActors)
+                // HitInterval gates repeated hits on the same actor (DoT / multi-hit projectiles).
+                if (const float* LastHit = Info.CollisionInfo.HitActors.Find(HitActor))
                 {
-                    AActor* HitActor = ActorPtr.Get();
-                    if (!HitActor)
+                    // HitInterval <= 0 means "no gating" (hit every time).
+                    if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
                     {
                         continue;
                     }
+                }
 
-                    // HitInterval gates repeated hits on the same actor (DoT / multi-hit projectiles).
-                    if (const float* LastHit = Info.CollisionInfo.HitActors.Find(HitActor))
+                const FVector HitLocation = HitActor->GetActorLocation();
+                const FVector HitNormal = (HitLocation - Center).GetSafeNormal();
+                FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
+                Hit.Location = HitLocation;
+                Hit.ImpactPoint = HitLocation;
+                Hit.TraceStart = Center;
+                Hit.TraceEnd = Center;
+                Hit.ImpactNormal = HitNormal;
+
+                if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
+                {
+                    if (!Info.Entity->GetLogicComponent()->FilterHit(Info, Hit))
                     {
-                        // HitInterval <= 0 means "no gating" (hit every time).
-                        if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
-                        {
-                            continue;
-                        }
+                        continue;
                     }
+                }
 
-                    const FVector HitLocation = HitActor->GetActorLocation();
-                    const FVector HitNormal = (HitLocation - Center).GetSafeNormal();
-                    FHitResult Hit(HitActor, nullptr, HitLocation, HitNormal);
-                    Hit.Location = HitLocation;
-                    Hit.ImpactPoint = HitLocation;
-                    Hit.TraceStart = Center;
-                    Hit.TraceEnd = Center;
-                    Hit.ImpactNormal = HitNormal;
+                Pending.Add(FPendingAutoHit{ HitActor, Hit });
+            }
 
-                    if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
-                    {
-                        if (!Info.Entity->GetLogicComponent()->FilterHit(Info, Hit))
-                        {
-                            continue;
-                        }
-                    }
+            if (Pending.Num() > 0)
+            {
+                // Phase 2: determine which accepted hits will be processed this tick (respects destroy-on-hit / max-hit limits).
+                TArray<FPendingAutoHit> ToProcess;
+                ToProcess.Reserve(Pending.Num());
+                int32 SimHitCount = Info.CollisionInfo.HitCount;
+                for (const FPendingAutoHit& Entry : Pending)
+                {
+                    SimHitCount++;
+                    ToProcess.Add(Entry);
 
-                    // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
-                    Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
-                    Info.CollisionInfo.HitCount++;
-                    Info.CollisionInfo.LastHitTime = WorldTime;
-                    Info.CollisionInfo.bHitThisFrame = true;
+                    const bool bHitLimitReached = SimHitCount >= Info.Config.Base.MaxHitCount;
+                    const bool bDestroyOnHit = Info.Config.Base.bDestroyOnHit || bHitLimitReached;
+                    const EBulletCollisionResponse Response = Info.Config.Base.CollisionResponse;
 
-                    const bool bDestroyed = Controller->HandleHitResult(Info, HitActor, Hit, true);
-                    if (bDestroyed)
+                    if (bHitLimitReached || ((Response == EBulletCollisionResponse::Destroy || Response == EBulletCollisionResponse::Support) && bDestroyOnHit))
                     {
                         break;
                     }
                 }
 
-                if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
+                // Mark batch and pre-fill HitActors so "apply to all hit actors" sees a complete set.
+                Info.CollisionInfo.LastHitTime = WorldTime;
+                Info.CollisionInfo.bHitThisFrame = true;
+                Info.CollisionInfo.LastHitBatchId++;
+                Info.CollisionInfo.LastBatchHitActors.Reset(ToProcess.Num());
+                for (const FPendingAutoHit& Entry : ToProcess)
                 {
-                    Info.Entity->GetLogicComponent()->HandlePostCollision(Info, Hits);
+                    Info.CollisionInfo.LastBatchHitActors.Add(Entry.Actor);
                 }
+
+                for (const FPendingAutoHit& Entry : ToProcess)
+                {
+                    Info.CollisionInfo.HitActors.Add(Entry.Actor, WorldTime);
+                    Info.CollisionInfo.HitCount++;
+                    const bool bDestroyed = Controller->HandleHitResult(Info, Entry.Actor, Entry.Hit, true);
+                    if (bDestroyed)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
+            {
+                Info.Entity->GetLogicComponent()->HandlePostCollision(Info, Hits);
             }
             ReleaseTrace();
             continue;
@@ -503,39 +559,6 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
             Hits = MoveTemp(UniqueHits);
         }
 
-        if (bManualHit)
-        {
-            TSet<TWeakObjectPtr<AActor>> NewOverlaps;
-            for (const FHitResult& Hit : Hits)
-            {
-                if (AActor* HitActor = Hit.GetActor())
-                {
-                    NewOverlaps.Add(HitActor);
-                }
-            }
-            Info.CollisionInfo.OverlapActors = MoveTemp(NewOverlaps);
-            #if WITH_EDITOR
-            UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep collect (manual): InstanceId=%d Count=%d"), Info.InstanceId, Info.CollisionInfo.OverlapActors.Num());
-            if (Info.CollisionInfo.OverlapActors.Num() > 0)
-            {
-                int32 Logged = 0;
-                for (const TWeakObjectPtr<AActor>& ActorPtr : Info.CollisionInfo.OverlapActors)
-                {
-                    if (AActor* HitActor = ActorPtr.Get())
-                    {
-                        UE_LOG(LogBullet, VeryVerbose, TEXT("  OverlapActor[%d]=%s"), Logged, *HitActor->GetName());
-                        if (++Logged >= MaxDebugActors)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-            #endif
-            ReleaseTrace();
-            continue;
-        }
-
         if (!Info.bIsSimple && Info.Entity && Info.Entity->GetLogicComponent())
         {
             Info.Entity->GetLogicComponent()->HandlePreCollision(Info, Hits);
@@ -544,6 +567,16 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
         #if WITH_EDITOR
         UE_LOG(LogBullet, VeryVerbose, TEXT("Sweep hits: InstanceId=%d Count=%d"), Info.InstanceId, Hits.Num());
         #endif
+
+        struct FPendingSweepHit
+        {
+            AActor* Actor = nullptr;
+            FHitResult Hit;
+        };
+
+        // Phase 1: gather accepted hits without dispatching OnHit yet.
+        TArray<FPendingSweepHit> Pending;
+        Pending.Reserve(Hits.Num());
         for (const FHitResult& Hit : Hits)
         {
             AActor* HitActor = Hit.GetActor();
@@ -574,16 +607,48 @@ void UBulletCollisionSystem::OnTick(float DeltaSeconds)
                 }
             }
 
-            // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
-            Info.CollisionInfo.HitActors.Add(HitActor, WorldTime);
-            Info.CollisionInfo.HitCount++;
+            Pending.Add(FPendingSweepHit{ HitActor, Hit });
+        }
+
+        if (Pending.Num() > 0)
+        {
+            // Phase 2: respect destroy-on-hit / max-hit limits.
+            TArray<FPendingSweepHit> ToProcess;
+            ToProcess.Reserve(Pending.Num());
+            int32 SimHitCount = Info.CollisionInfo.HitCount;
+            for (const FPendingSweepHit& Entry : Pending)
+            {
+                SimHitCount++;
+                ToProcess.Add(Entry);
+
+                const bool bHitLimitReached = SimHitCount >= Info.Config.Base.MaxHitCount;
+                const bool bDestroyOnHit = Info.Config.Base.bDestroyOnHit || bHitLimitReached;
+                const EBulletCollisionResponse Response = Info.Config.Base.CollisionResponse;
+
+                if (bHitLimitReached || ((Response == EBulletCollisionResponse::Destroy || Response == EBulletCollisionResponse::Support) && bDestroyOnHit))
+                {
+                    break;
+                }
+            }
+
             Info.CollisionInfo.LastHitTime = WorldTime;
             Info.CollisionInfo.bHitThisFrame = true;
-
-            const bool bDestroyed = Controller->HandleHitResult(Info, HitActor, Hit, true);
-            if (bDestroyed)
+            Info.CollisionInfo.LastHitBatchId++;
+            Info.CollisionInfo.LastBatchHitActors.Reset(ToProcess.Num());
+            for (const FPendingSweepHit& Entry : ToProcess)
             {
-                break;
+                Info.CollisionInfo.LastBatchHitActors.Add(Entry.Actor);
+            }
+
+            for (const FPendingSweepHit& Entry : ToProcess)
+            {
+                Info.CollisionInfo.HitActors.Add(Entry.Actor, WorldTime);
+                Info.CollisionInfo.HitCount++;
+                const bool bDestroyed = Controller->HandleHitResult(Info, Entry.Actor, Entry.Hit, true);
+                if (bDestroyed)
+                {
+                    break;
+                }
             }
         }
 

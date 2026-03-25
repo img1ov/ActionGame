@@ -118,12 +118,22 @@ struct FBulletCollisionInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
     float LastHitTime = 0.0f;
 
+    // Monotonic batch id for accepted hits. Increments whenever we accept a new hit batch (manual processing call
+    // or auto-collision tick). This is used to reliably group multi-target hits even when multiple batches happen
+    // within the same frame (WorldTime can be identical).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
+    int32 LastHitBatchId = 0;
+
     // True if any hit was accepted in the current collision tick.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
     bool bHitThisFrame = false;
 
     // Per-actor last hit time to support interval damage.
     TMap<TWeakObjectPtr<AActor>, float> HitActors;
+
+    // Actors accepted in the most recent hit batch (LastHitBatchId).
+    // This is a transient snapshot used by "apply to all hit actors" logic controllers.
+    TArray<TWeakObjectPtr<AActor>> LastBatchHitActors;
 
     // Snapshot of actors currently overlapping this bullet shape (overlap mode) or hit along the trace (ray mode).
     // This is used for manual-hit triggering and for "damage over time" style hit processing.

@@ -101,8 +101,17 @@ enum class EBulletCollisionMode : uint8
 UENUM(BlueprintType)
 enum class EBulletHitTrigger : uint8
 {
-    Auto,
+    EachFrame,
     Manual
+};
+
+UENUM(BlueprintType)
+enum class EImpactDirection : uint8
+{
+    Up,
+    Down,
+    Left,
+    Right
 };
 
 USTRUCT(BlueprintType)
@@ -113,6 +122,10 @@ struct FHitReactImpulse
     // GameplayEvent tag that drives GA_HitReact (ability should be triggered by this event tag).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     FGameplayTag HitReactTag;
+    
+    // Direction for hit reaction visuals
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    EImpactDirection VisualImpactDirection;
 
     // Impulse direction/amount. Interpretation is up to the target hit-react blueprint/GA.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
@@ -121,6 +134,7 @@ struct FHitReactImpulse
     // Primary strength used for scaling / montage selection / convenience (also mirrored into EventData.EventMagnitude).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     float Strength = 0.0f;
+    
 };
 
 USTRUCT(BlueprintType)
@@ -136,7 +150,8 @@ struct FBulletPayload
     TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
 
     // Optional hit-react payload injected at spawn time (typically via AnimNotify/GA).
-    // If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, this will be forwarded to the target ASC via GameplayEventData.OptionalObject.
+    // If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, this will be forwarded to the target ASC via
+    // GameplayEventData.TargetData (see FHitReactImpulseTargetData).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault))
     FHitReactImpulse HitReactImpulse;
 };
@@ -188,7 +203,7 @@ struct FBulletDataBase
 
     /** Whether the collision system triggers hits automatically or stores overlaps for manual triggering. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
-    EBulletHitTrigger HitTrigger = EBulletHitTrigger::Auto;
+    EBulletHitTrigger HitTrigger = EBulletHitTrigger::EachFrame;
 
     /** Initial collision enabled state on spawn (can be toggled later via controller). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base")
@@ -572,7 +587,7 @@ struct FBulletDataMain : public FTableRowBase
             Base.MaxHitCount = 1;
             Base.CollisionResponse = EBulletCollisionResponse::Destroy;
             Base.CollisionMode = EBulletCollisionMode::Sweep;
-            Base.HitTrigger = EBulletHitTrigger::Auto;
+            Base.HitTrigger = EBulletHitTrigger::EachFrame;
             Base.CollisionChannel = ECC_WorldDynamic;
 
             Move.MoveType = EBulletMoveType::Straight;

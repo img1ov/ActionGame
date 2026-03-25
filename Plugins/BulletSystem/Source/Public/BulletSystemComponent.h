@@ -21,17 +21,16 @@ class UBulletConfig;
  *
  * Notes:
  * - Key is a local runtime label. It does not replicate.
- * - Same key overwrites by design (points to the latest spawn). This matches typical action combat usage:
- *   one spawn window -> zero or more manual-hit events -> destroy.
+ * - Same key may have multiple active instances during overlapping windows (combo notifies, buffering, etc.).
+ *   GetInstanceIdByKey returns the most recently spawned valid instance.
  */
 USTRUCT()
 struct FBulletInstanceRegistry
 {
 	GENERATED_BODY()
 
-	/** Key -> InstanceId. Overwrite when key already exists. */
-	UPROPERTY(Transient)
-	TMap<FName, int32> InstanceKeyMap;
+	/** Key -> InstanceIds (in spawn order). Runtime-only, not serialized. */
+	TMap<FName, TArray<int32>> InstanceKeyMap;
 
 	void ClearKeyMap() { InstanceKeyMap.Reset(); }
 	bool RemoveKey(FName Key) { return !Key.IsNone() && InstanceKeyMap.Remove(Key) > 0; }
@@ -46,7 +45,7 @@ struct FBulletInstanceRegistry
 			InstanceKeyMap.Remove(Key);
 			return;
 		}
-		InstanceKeyMap.Add(Key, InstanceId);
+		InstanceKeyMap.FindOrAdd(Key).Add(InstanceId);
 	}
 	
 	int32 GetInstanceIdByKey(FName Key) const
@@ -55,9 +54,9 @@ struct FBulletInstanceRegistry
 		{
 			return INDEX_NONE;
 		}
-		if (const int32* Found = InstanceKeyMap.Find(Key))
+		if (const TArray<int32>* Found = InstanceKeyMap.Find(Key))
 		{
-			return *Found;
+			return Found->Num() > 0 ? Found->Last() : INDEX_NONE;
 		}
 		return INDEX_NONE;
 	}
@@ -81,6 +80,13 @@ public:
 	/** Resolve a runtime bullet instance by key. Invalid entries are pruned. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|InstanceRegistry")
 	int32 GetInstanceIdByKey(FName InstanceKey) const;
+
+	/**
+	 * Consume the oldest valid instance id for a key (and remove it from the registry).
+	 * This is useful for notify-state style windows that can overlap: End events should destroy the oldest still-alive instance for that key.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
+	int32 ConsumeOldestInstanceIdByKey(FName InstanceKey);
 
 	/** Set or overwrite key -> InstanceId. Passing INDEX_NONE removes the key. */
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
@@ -106,12 +112,12 @@ public:
 
 	// Manual-hit trigger: process stored overlaps as hits (fires OnHit logic chain, interact, collision response).
 	UFUNCTION(BlueprintCallable, Category = "BulletSystem")
-	int32 ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
+	int32 ProcessManualHits(int32 InstanceId, bool bApplyCollisionResponse);
 
 private:
 	int32 SpawnBulletInternal(FName BulletId, const FBulletInitParams& InitParams);
 	bool DestroyBulletInternal(int32 InstanceId) const;
-	int32 ProcessManualHitsInternal(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
+	int32 ProcessManualHitsInternal(int32 InstanceId, bool bApplyCollisionResponse) const;
 	bool IsInstanceIdValid(int32 InstanceId) const;
 
 	UPROPERTY()

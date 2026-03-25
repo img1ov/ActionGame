@@ -7,6 +7,7 @@
 #include "Controller/BulletWorldSubsystem.h"
 #include "Controller/BulletController.h"
 #include "BulletSystemInterface.h"
+#include "Logic/BulletLogicControllerTypes.h"
 #include "Model/BulletModel.h"
 #include "Engine/World.h"
 #include "UObject/UObjectIterator.h"
@@ -61,6 +62,27 @@ int32 UBulletSystemBlueprintLibrary::GetInstanceIdByKey(AActor* SourceActor, FNa
     return BulletComponent ? BulletComponent->GetInstanceIdByKey(InstanceKey) : INDEX_NONE;
 }
 
+int32 UBulletSystemBlueprintLibrary::ConsumeOldestInstanceIdByKey(AActor* SourceActor, FName InstanceKey)
+{
+    if (!SourceActor || InstanceKey.IsNone())
+    {
+        return INDEX_NONE;
+    }
+
+    UBulletSystemComponent* BulletComponent = nullptr;
+    if (SourceActor->GetClass()->ImplementsInterface(UBulletSystemInterface::StaticClass()))
+    {
+        BulletComponent = IBulletSystemInterface::Execute_GetBulletSystemComponent(SourceActor);
+    }
+
+    if (!BulletComponent)
+    {
+        BulletComponent = SourceActor->FindComponentByClass<UBulletSystemComponent>();
+    }
+
+    return BulletComponent ? BulletComponent->ConsumeOldestInstanceIdByKey(InstanceKey) : INDEX_NONE;
+}
+
 bool UBulletSystemBlueprintLibrary::DestroyBullet(const UObject* WorldContextObject, int32 InstanceId)
 {
     if (!WorldContextObject)
@@ -113,7 +135,7 @@ bool UBulletSystemBlueprintLibrary::IsBulletValid(const UObject* WorldContextObj
     return Info != nullptr && !Info->bNeedDestroy;
 }
 
-bool UBulletSystemBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors)
+bool UBulletSystemBlueprintLibrary::SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps)
 {
     if (!WorldContextObject)
     {
@@ -132,32 +154,10 @@ bool UBulletSystemBlueprintLibrary::SetBulletCollisionEnabled(const UObject* Wor
         return false;
     }
 
-    return Subsystem->GetController()->SetCollisionEnabled(InstanceId, bEnabled, bClearOverlaps, bResetHitActors);
+    return Subsystem->GetController()->SetCollisionEnabled(InstanceId, bEnabled, bClearOverlaps);
 }
 
-bool UBulletSystemBlueprintLibrary::ResetBulletHitActors(const UObject* WorldContextObject, int32 InstanceId)
-{
-    if (!WorldContextObject)
-    {
-        return false;
-    }
-
-    UWorld* World = WorldContextObject->GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    UBulletWorldSubsystem* Subsystem = World->GetSubsystem<UBulletWorldSubsystem>();
-    if (!Subsystem || !Subsystem->GetController())
-    {
-        return false;
-    }
-
-    return Subsystem->GetController()->ResetHitActors(InstanceId);
-}
-
-int32 UBulletSystemBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
+int32 UBulletSystemBlueprintLibrary::ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bApplyCollisionResponse)
 {
     if (!WorldContextObject)
     {
@@ -176,7 +176,7 @@ int32 UBulletSystemBlueprintLibrary::ProcessManualHits(const UObject* WorldConte
         return 0;
     }
 
-    return Subsystem->GetController()->ProcessManualHits(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
+    return Subsystem->GetController()->ProcessManualHits(InstanceId, bApplyCollisionResponse);
 }
 
 TArray<AActor*> UBulletSystemBlueprintLibrary::GetBulletHitActors(const FBulletInfo& BulletInfo)
@@ -195,22 +195,13 @@ TArray<AActor*> UBulletSystemBlueprintLibrary::GetBulletHitActors(const FBulletI
 
 TArray<AActor*> UBulletSystemBlueprintLibrary::GetBulletHitActorsAtLastHitTime(const FBulletInfo& BulletInfo, float TimeTolerance)
 {
+    (void)TimeTolerance;
+
     TArray<AActor*> OutActors;
-    const float HitTime = BulletInfo.CollisionInfo.LastHitTime;
-    if (HitTime <= -BIG_NUMBER)
+    OutActors.Reserve(BulletInfo.CollisionInfo.LastBatchHitActors.Num());
+    for (const TWeakObjectPtr<AActor>& ActorPtr : BulletInfo.CollisionInfo.LastBatchHitActors)
     {
-        return OutActors;
-    }
-
-    OutActors.Reserve(BulletInfo.CollisionInfo.HitActors.Num());
-    for (const TPair<TWeakObjectPtr<AActor>, float>& Pair : BulletInfo.CollisionInfo.HitActors)
-    {
-        if (!FMath::IsNearlyEqual(Pair.Value, HitTime, TimeTolerance))
-        {
-            continue;
-        }
-
-        if (AActor* HitActor = Pair.Key.Get())
+        if (AActor* HitActor = ActorPtr.Get())
         {
             OutActors.Add(HitActor);
         }
@@ -369,4 +360,26 @@ bool UBulletSystemBlueprintLibrary::GetPayloadSetByCallerMagnitudeByTagFromPaylo
 
     OutMagnitude = *Found;
     return true;
+}
+
+bool UBulletSystemBlueprintLibrary::GetHitReactImpulseFromEventData(const FGameplayEventData& EventData, FHitReactImpulse& OutHitReactImpulse)
+{
+	OutHitReactImpulse = FHitReactImpulse();
+
+	for (const TSharedPtr<FGameplayAbilityTargetData>& Data : EventData.TargetData.Data)
+	{
+		if (!Data.IsValid())
+		{
+			continue;
+		}
+
+		if (Data->GetScriptStruct() && Data->GetScriptStruct()->IsChildOf(FHitReactImpulseTargetData::StaticStruct()))
+		{
+			const FHitReactImpulseTargetData* HitReactData = static_cast<const FHitReactImpulseTargetData*>(Data.Get());
+			OutHitReactImpulse = HitReactData->HitReactImpulse;
+			return true;
+		}
+	}
+
+	return false;
 }

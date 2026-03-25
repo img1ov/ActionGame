@@ -93,12 +93,12 @@ bool UBulletSystemComponent::DestroyBulletInternal(int32 InstanceId) const
 	return true;
 }
 
-int32 UBulletSystemComponent::ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse)
+int32 UBulletSystemComponent::ProcessManualHits(int32 InstanceId, bool bApplyCollisionResponse)
 {
-	return ProcessManualHitsInternal(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
+	return ProcessManualHitsInternal(InstanceId, bApplyCollisionResponse);
 }
 
-int32 UBulletSystemComponent::ProcessManualHitsInternal(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
+int32 UBulletSystemComponent::ProcessManualHitsInternal(int32 InstanceId, bool bApplyCollisionResponse) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -112,7 +112,7 @@ int32 UBulletSystemComponent::ProcessManualHitsInternal(int32 InstanceId, bool b
 		return 0;
 	}
 
-	return Subsystem->GetController()->ProcessManualHits(InstanceId, bResetHitActorsBefore, bApplyCollisionResponse);
+	return Subsystem->GetController()->ProcessManualHits(InstanceId, bApplyCollisionResponse);
 }
 
 bool UBulletSystemComponent::IsInstanceIdValid(int32 InstanceId) const
@@ -146,20 +146,66 @@ bool UBulletSystemComponent::IsInstanceIdValid(int32 InstanceId) const
 
 int32 UBulletSystemComponent::GetInstanceIdByKey(FName InstanceKey) const
 {
-	const int32 InstanceId = InstanceRegistry.GetInstanceIdByKey(InstanceKey);
-	if (InstanceId == INDEX_NONE)
+	if (InstanceKey.IsNone())
 	{
 		return INDEX_NONE;
 	}
 
-	if (!IsInstanceIdValid(InstanceId))
+	TArray<int32>* InstanceIds = InstanceRegistry.InstanceKeyMap.Find(InstanceKey);
+	if (!InstanceIds || InstanceIds->Num() == 0)
 	{
-		// Lazy prune to avoid stale key accumulation (e.g. bullet lifetime expiry).
-		InstanceRegistry.InstanceKeyMap.Remove(InstanceKey);
 		return INDEX_NONE;
 	}
 
-	return InstanceId;
+	// Prune invalid entries from the back and return the newest still-valid instance.
+	for (int32 Index = InstanceIds->Num() - 1; Index >= 0; --Index)
+	{
+		const int32 Candidate = (*InstanceIds)[Index];
+		if (IsInstanceIdValid(Candidate))
+		{
+			if (Index != InstanceIds->Num() - 1)
+			{
+				InstanceIds->SetNum(Index + 1);
+			}
+			return Candidate;
+		}
+
+		InstanceIds->RemoveAt(Index, /*Count*/ 1, EAllowShrinking::No);
+	}
+
+	InstanceRegistry.InstanceKeyMap.Remove(InstanceKey);
+	return INDEX_NONE;
+}
+
+int32 UBulletSystemComponent::ConsumeOldestInstanceIdByKey(FName InstanceKey)
+{
+	if (InstanceKey.IsNone())
+	{
+		return INDEX_NONE;
+	}
+
+	TArray<int32>* InstanceIds = InstanceRegistry.InstanceKeyMap.Find(InstanceKey);
+	if (!InstanceIds || InstanceIds->Num() == 0)
+	{
+		return INDEX_NONE;
+	}
+
+	while (InstanceIds->Num() > 0)
+	{
+		const int32 Candidate = (*InstanceIds)[0];
+		InstanceIds->RemoveAt(0, /*Count*/ 1, EAllowShrinking::No);
+		if (IsInstanceIdValid(Candidate))
+		{
+			if (InstanceIds->Num() == 0)
+			{
+				InstanceRegistry.InstanceKeyMap.Remove(InstanceKey);
+			}
+			return Candidate;
+		}
+	}
+
+	InstanceRegistry.InstanceKeyMap.Remove(InstanceKey);
+	return INDEX_NONE;
 }
 
 void UBulletSystemComponent::SetInstanceIdKey(FName InstanceKey, int32 InstanceId)

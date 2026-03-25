@@ -10,7 +10,7 @@
 #include "Actor/BulletActor.h"
 #include "Controller/BulletController.h"
 #include "Entity/BulletEntity.h"
-#include "Logic/HitReactOptional.h"
+#include "GameplayEffect.h"
 #include "Model/BulletInfo.h"
 
 class UAbilitySystemComponent;
@@ -241,7 +241,13 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 	}
 
 	const FActiveGameplayEffectHandle ActiveHandle = SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-	bool bAttemptedApply = ActiveHandle.IsValid();
+	// For Instant GEs the returned handle is expected to be invalid (-1) even when the effect is applied.
+	// Use handle validity only for non-instant effects, otherwise treat "we got here" as success.
+	bool bAttemptedApply = true;
+	if (SpecHandle.Data->Def && SpecHandle.Data->Def->DurationPolicy != EGameplayEffectDurationType::Instant)
+	{
+		bAttemptedApply = ActiveHandle.IsValid();
+	}
 
 	// Optional: fire a gameplay event to drive hit-react abilities using EventData + EffectContext.
 	// Note: We intentionally keep this server-driven for stability.
@@ -254,20 +260,22 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 				const FHitReactImpulse& HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
 				if (HitReactImpulse.HitReactTag.IsValid())
 				{
-					UHitReactOptional* Optional = NewObject<UHitReactOptional>(TargetASC);
-					Optional->HitReactImpulse = HitReactImpulse;
+					FGameplayAbilityTargetDataHandle TargetData;
+					FHitReactImpulseTargetData* HitReactTargetData = new FHitReactImpulseTargetData();
+					HitReactTargetData->HitReactImpulse = HitReactImpulse;
+					TargetData.Add(HitReactTargetData);
 
 					FGameplayEventData EventData;
 					EventData.EventTag = HitReactImpulse.HitReactTag;
 					EventData.Instigator = SourceActor;
 					EventData.Target = TargetActor;
-					EventData.OptionalObject = Optional;
+					EventData.TargetData = TargetData;
 					EventData.ContextHandle = SpecHandle.Data->GetContext();
 					EventData.EventMagnitude = HitReactImpulse.Strength;
 
 					if (TargetASC->HandleGameplayEvent(EventData.EventTag, &EventData))
 					{
-					    bAttemptedApply = true;
+						bAttemptedApply = true;
 					}
 				}
 			}
@@ -325,21 +333,34 @@ void UBulletLogicController_ApplyGameplayEffect::OnHit(FBulletInfo& BulletInfo, 
 
     if (ApplyData->bApplyToAllHitActors)
     {
-        const float BatchHitTime = BulletInfo.CollisionInfo.LastHitTime;
-        if (FMath::IsNearlyEqual(LastAppliedBatchHitTime, BatchHitTime, 0.001f))
+        const uint32 BatchId = BulletInfo.CollisionInfo.LastHitBatchId;
+        if (BatchId != 0 && LastAppliedBatchId == BatchId)
         {
             return;
         }
-        LastAppliedBatchHitTime = BatchHitTime;
+        LastAppliedBatchId = BatchId;
 
-        for (const TPair<TWeakObjectPtr<AActor>, float>& Pair : BulletInfo.CollisionInfo.HitActors)
+        const TArray<TWeakObjectPtr<AActor>>& BatchActors = BulletInfo.CollisionInfo.LastBatchHitActors;
+        if (BatchActors.Num() == 0)
         {
-            if (!FMath::IsNearlyEqual(Pair.Value, BatchHitTime, 0.001f))
+            // Defensive fallback: if the caller didn't populate LastBatchHitActors, still apply to the direct hit actor.
+            AActor* TargetActor = Hit.GetActor();
+            if (!TargetActor)
             {
-                continue;
+                TargetActor = BulletInfo.InitParams.TargetActor;
             }
+            if (TargetActor)
+            {
+                const FHitResult TargetHit = BuildBestEffortHitForTarget(BulletInfo, Hit, TargetActor);
+                const bool bApplied = ApplyEffectToTarget(ApplyData, BulletInfo, SourceActor, TargetActor, TargetHit);
+                OnEffectApplied(BulletInfo, TargetHit, bApplied);
+            }
+            return;
+        }
 
-            AActor* TargetActor = Pair.Key.Get();
+        for (const TWeakObjectPtr<AActor>& ActorPtr : BatchActors)
+        {
+            AActor* TargetActor = ActorPtr.Get();
             if (!TargetActor)
             {
                 continue;

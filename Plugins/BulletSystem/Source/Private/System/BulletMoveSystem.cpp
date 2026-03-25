@@ -53,9 +53,15 @@ void UBulletMoveSystem::OnTick(float DeltaSeconds)
         float RawDelta = DeltaSeconds;
         if (Info.Entity && Info.Entity->GetBudgetComponent())
         {
+            // Manual-hit (melee hitboxes) and attached movement must stay in sync with the owner every frame.
+            // If we decimate move ticks here, the hitbox location can become stale and manual hit queries can miss.
+            const bool bForceFullRateMove =
+                (Info.Config.Base.HitTrigger == EBulletHitTrigger::Manual) ||
+                (Info.MoveInfo.bAttachToOwner || Info.Config.Move.MoveType == EBulletMoveType::Attached);
+
             // Budgeting can decimate updates for cheap bullets (e.g. off-screen / low priority).
             // OutDelta is adjusted to reflect time since last tick to keep movement roughly consistent.
-            if (!Info.Entity->GetBudgetComponent()->ConsumeMoveTick(WorldTime, DeltaSeconds, RawDelta))
+            if (!bForceFullRateMove && !Info.Entity->GetBudgetComponent()->ConsumeMoveTick(WorldTime, DeltaSeconds, RawDelta))
             {
                 continue;
             }

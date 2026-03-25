@@ -91,7 +91,9 @@ void UBulletActionInitHit::Execute(UBulletController* InController, FBulletInfo&
     BulletInfo.CollisionInfo.HitCount = 0;
     BulletInfo.CollisionInfo.HitActors.Reset();
     BulletInfo.CollisionInfo.LastHitTime = -BIG_NUMBER;
+    BulletInfo.CollisionInfo.LastHitBatchId = 0;
     BulletInfo.CollisionInfo.bHitThisFrame = false;
+    BulletInfo.CollisionInfo.LastBatchHitActors.Reset();
 
 #if WITH_EDITOR
     UE_LOG(LogBullet, VeryVerbose, TEXT("InitHit: InstanceId=%d"), BulletInfo.InstanceId);
@@ -230,8 +232,10 @@ void UBulletActionInitCollision::Execute(UBulletController* InController, FBulle
     BulletInfo.CollisionInfo.HitActors.Reset();
     BulletInfo.CollisionInfo.HitCount = 0;
     BulletInfo.CollisionInfo.LastHitTime = -BIG_NUMBER;
+    BulletInfo.CollisionInfo.LastHitBatchId = 0;
     BulletInfo.CollisionInfo.bCollisionEnabled = BulletInfo.Config.Base.bCollisionEnabledOnSpawn;
     BulletInfo.CollisionInfo.OverlapActors.Reset();
+    BulletInfo.CollisionInfo.LastBatchHitActors.Reset();
 
 #if WITH_EDITOR
     UE_LOG(LogBullet, VeryVerbose, TEXT("InitCollision: InstanceId=%d Enabled=%s Mode=%d Shape=%d HitInterval=%.3f StartDelay=%.3f"),

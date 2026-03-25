@@ -146,8 +146,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
     FGameplayTagContainer DynamicGrantedTags;
 
-	// If true, apply the effect to all actors accepted at the bullet's LastHitTime (typically the current frame).
-	// This is useful for "single dispatch" damage logic that wants the full hit batch.
+	// If true, apply the effect once per accepted hit batch, to all actors accepted in that batch.
+	// This is useful for "single dispatch" damage logic that wants the full hit batch (multi-target overlaps, etc).
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS")
 	bool bApplyToAllHitActors = false;
 

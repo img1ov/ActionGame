@@ -32,10 +32,6 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
 	FName InstanceKey = NAME_None;
-
-	// ProcessManualHits parameters.
-	UPROPERTY(BlueprintReadOnly, Category = "Bullet")
-	bool bResetHitActorsBefore = true;
 };
 
 /**
@@ -49,6 +45,8 @@ class BULLETSYSTEM_API UAN_SpawnBullet : public UAnimNotify
 	GENERATED_BODY()
 
 public:
+	UAN_SpawnBullet();
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName BulletId = NAME_None;
 
@@ -61,7 +59,8 @@ public:
 	FName SpawnSocketName = NAME_None;
 
 	// Optional hit-react impulse payload injected into InitParams.Payload for this bullet spawn.
-	// If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, the hit target will receive this via GameplayEventData.OptionalObject.
+	// If UBulletLogicData_ApplyGameplayEffect.bApplyHitReact is enabled, the hit target will receive this via
+	// GameplayEventData.TargetData (see FHitReactImpulseTargetData).
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|HitReact")
 	FHitReactImpulse HitReactImpulse;
 
@@ -90,14 +89,13 @@ class BULLETSYSTEM_API UAN_ProcessManualHits : public UAnimNotify
 	GENERATED_BODY()
 
 public:
+	UAN_ProcessManualHits();
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName InstanceKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet|GA")
 	FGameplayTag EventTag;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
-	bool bResetHitActorsBefore = true;
 
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
 
@@ -116,6 +114,8 @@ class BULLETSYSTEM_API UAN_DestroyBullet : public UAnimNotify
 	GENERATED_BODY()
 
 public:
+	UAN_DestroyBullet();
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName InstanceKey = NAME_None;
 
@@ -139,6 +139,8 @@ class BULLETSYSTEM_API UANS_SpawnBullet : public UAnimNotifyState
 	GENERATED_BODY()
 
 public:
+	UANS_SpawnBullet();
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bullet")
 	FName BulletId = NAME_None;
 

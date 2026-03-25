@@ -8,9 +8,50 @@
 #include "Engine/EngineTypes.h"
 #include "Logic/BulletLogicController.h"
 #include "Logic/BulletLogicDataTypes.h"
+#include "Abilities/GameplayAbilityTargetTypes.h"
+#include "BulletSystemTypes.h"
 #include "BulletLogicControllerTypes.generated.h"
 
 class AActor;
+
+USTRUCT()
+struct BULLETSYSTEM_API FHitReactImpulseTargetData : public FGameplayAbilityTargetData
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY()
+	FHitReactImpulse HitReactImpulse;
+
+	virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
+	virtual FString ToString() const override { return TEXT("FHitReactImpulseTargetData"); }
+
+	// NetSerialize is used via TStructOpsTypeTraits (WithNetSerializer = true).
+	// Note: FGameplayAbilityTargetData doesn't declare NetSerialize as a virtual in all UE versions, so do not use override.
+	bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess)
+	{
+		bOutSuccess = true;
+
+		bool bTagSuccess = true;
+		HitReactImpulse.HitReactTag.NetSerialize(Ar, Map, bTagSuccess);
+		bOutSuccess &= bTagSuccess;
+
+		Ar << HitReactImpulse.ImpulseVector;
+		Ar << HitReactImpulse.Strength;
+
+		return bOutSuccess;
+	}
+};
+
+template<>
+struct TStructOpsTypeTraits<FHitReactImpulseTargetData> : public TStructOpsTypeTraitsBase2<FHitReactImpulseTargetData>
+{
+	enum
+	{
+		WithNetSerializer = true,
+		WithCopy = true
+	};
+};
 
 UCLASS()
 class BULLETSYSTEM_API UBulletLogicCreateBulletController : public UBulletLogicControllerBlueprintBase
@@ -115,6 +156,7 @@ private:
         const FHitResult& TargetHit) const;
     static FHitResult BuildBestEffortHitForTarget(const FBulletInfo& BulletInfo, const FHitResult& FallbackHit, AActor* TargetActor);
 
-    // Used when bApplyToAllHitActorsAtLastHitTime is enabled to ensure we only apply once per hit batch.
-    float LastAppliedBatchHitTime = -BIG_NUMBER;
+    // Used when bApplyToAllHitActors is enabled to ensure we only apply once per hit batch (even if multiple actors
+    // trigger OnHit for the same batch).
+    uint32 LastAppliedBatchId = 0;
 };

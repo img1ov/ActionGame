@@ -62,10 +62,9 @@ public:
     void MarkBulletForDestroy(int32 InstanceId) const;
 
     // Runtime collision toggles and hit-cache management.
-    bool SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const;
-    bool ResetHitActors(int32 InstanceId) const;
-    // Manual-hit trigger: process stored overlaps as hits (fires OnHit logic chain, interact, collision response).
-    int32 ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const;
+    bool SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps) const;
+    // Manual-hit trigger: run a single collision query and resolve hits (fires OnHit logic chain, interact, collision response).
+    int32 ProcessManualHits(int32 InstanceId, bool bApplyCollisionResponse) const;
 
     // Resolve a hit and apply response (logic hooks, interact, destroy/bounce/support).
     bool HandleHitResult(FBulletInfo& Info, AActor* HitActor, const FHitResult& Hit, bool bApplyCollisionResponse) const;
@@ -107,8 +106,6 @@ private:
     void RequestDestroyBulletInternal(int32 InstanceId, bool bSummonChildrenOnDestroy) const;
     // Finalize pending destroys and release pooled objects.
     void FlushDestroyedBullets() const;
-    // Frame-end: clear hit caches requested by gameplay (keeps hit info valid for the current frame's logic chain).
-    void FlushDeferredHitActorResets() const;
     // Perform a collision query for manual-hit processing and return the current hit candidates.
     void CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const;
     // Build child init params (owner/target/payload inheritance).
@@ -145,9 +142,6 @@ private:
 
     UPROPERTY()
     TObjectPtr<UBulletCollisionSystem> CollisionSystem;
-
-    // InstanceIds queued to reset CollisionInfo.HitActors at end of frame (used by ProcessManualHits reset option).
-    mutable TSet<int32> DeferredHitActorsReset;
 
     bool bEnableDebugDraw = false;
 };

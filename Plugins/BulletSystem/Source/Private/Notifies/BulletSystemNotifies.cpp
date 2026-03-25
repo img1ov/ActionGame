@@ -12,6 +12,13 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 
+UAN_SpawnBullet::UAN_SpawnBullet()
+{
+	// Treat gameplay-critical notifies as native branching points when used on montages.
+	// This avoids missing single-frame queued notifies on the server when montage evaluation skips/fast-forwards.
+	bIsNativeBranchingPoint = true;
+}
+
 void UAN_SpawnBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
@@ -74,13 +81,13 @@ void UAN_SpawnBullet::OnNotify_Implementation(USkeletalMeshComponent* MeshComp, 
 			{
 				if (UBulletWorldSubsystem* Subsystem = World->GetSubsystem<UBulletWorldSubsystem>())
 				{
-					if (UBulletController* Controller = Subsystem->GetController())
-					{
-						(void)Controller->SetCollisionEnabled(InstanceId, /*bEnabled*/ true, /*bClearOverlaps*/ false, /*bResetHitActors*/ false);
+						if (UBulletController* Controller = Subsystem->GetController())
+						{
+							(void)Controller->SetCollisionEnabled(InstanceId, /*bEnabled*/ true, /*bClearOverlaps*/ false);
+						}
 					}
 				}
 			}
-		}
 		return;
 	}
 
@@ -102,6 +109,12 @@ void UAN_SpawnBullet::OnNotify_Implementation(USkeletalMeshComponent* MeshComp, 
 
 	// No GA tag: spawn locally (usable for non-GAS gameplay).
 	(void)BulletComp->SpawnBullet(BulletId, InitParams);
+}
+
+UAN_ProcessManualHits::UAN_ProcessManualHits()
+{
+	// See UAN_SpawnBullet.
+	bIsNativeBranchingPoint = true;
 }
 
 void UAN_ProcessManualHits::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
@@ -147,7 +160,7 @@ void UAN_ProcessManualHits::OnNotify_Implementation(USkeletalMeshComponent* Mesh
 		const int32 InstanceId = BulletComp->GetInstanceIdByKey(InstanceKey);
 		if (InstanceId != INDEX_NONE)
 		{
-			(void)BulletComp->ProcessManualHits(InstanceId, bResetHitActorsBefore, /*bApplyCollisionResponse*/ true);
+			(void)BulletComp->ProcessManualHits(InstanceId, /*bApplyCollisionResponse*/ true);
 		}
 		return;
 	}
@@ -156,7 +169,6 @@ void UAN_ProcessManualHits::OnNotify_Implementation(USkeletalMeshComponent* Mesh
 	{
 		UBulletNotifyOptionalObject* OptionalObj = NewObject<UBulletNotifyOptionalObject>(OwnerActor);
 		OptionalObj->InstanceKey = InstanceKey;
-		OptionalObj->bResetHitActorsBefore = bResetHitActorsBefore;
 
 		FGameplayEventData EventData;
 		EventData.EventTag = EventTag;
@@ -178,8 +190,14 @@ void UAN_ProcessManualHits::OnNotify_Implementation(USkeletalMeshComponent* Mesh
 	const int32 InstanceId = BulletComp->GetInstanceIdByKey(InstanceKey);
 	if (InstanceId != INDEX_NONE)
 	{
-		(void)BulletComp->ProcessManualHits(InstanceId, bResetHitActorsBefore, /*bApplyCollisionResponse*/ true);
+		(void)BulletComp->ProcessManualHits(InstanceId, /*bApplyCollisionResponse*/ true);
 	}
+}
+
+UAN_DestroyBullet::UAN_DestroyBullet()
+{
+	// See UAN_SpawnBullet.
+	bIsNativeBranchingPoint = true;
 }
 
 void UAN_DestroyBullet::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
@@ -222,11 +240,10 @@ void UAN_DestroyBullet::OnNotify_Implementation(USkeletalMeshComponent* MeshComp
 			return;
 		}
 
-		const int32 InstanceId = BulletComp->GetInstanceIdByKey(InstanceKey);
+		const int32 InstanceId = BulletComp->ConsumeOldestInstanceIdByKey(InstanceKey);
 		if (InstanceId != INDEX_NONE)
 		{
 			(void)BulletComp->DestroyBullet(InstanceId);
-			BulletComp->RemoveInstanceKey(InstanceKey);
 		}
 		return;
 	}
@@ -253,12 +270,17 @@ void UAN_DestroyBullet::OnNotify_Implementation(USkeletalMeshComponent* MeshComp
 		return;
 	}
 
-	const int32 InstanceId = BulletComp->GetInstanceIdByKey(InstanceKey);
+	const int32 InstanceId = BulletComp->ConsumeOldestInstanceIdByKey(InstanceKey);
 	if (InstanceId != INDEX_NONE)
 	{
 		(void)BulletComp->DestroyBullet(InstanceId);
-		BulletComp->RemoveInstanceKey(InstanceKey);
 	}
+}
+
+UANS_SpawnBullet::UANS_SpawnBullet()
+{
+	// See UAN_SpawnBullet.
+	bIsNativeBranchingPoint = true;
 }
 
 void UANS_SpawnBullet::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
@@ -322,13 +344,13 @@ void UANS_SpawnBullet::OnBegin_Implementation(USkeletalMeshComponent* MeshComp, 
 			{
 				if (UBulletWorldSubsystem* Subsystem = World->GetSubsystem<UBulletWorldSubsystem>())
 				{
-					if (UBulletController* Controller = Subsystem->GetController())
-					{
-						(void)Controller->SetCollisionEnabled(InstanceId, /*bEnabled*/ true, /*bClearOverlaps*/ false, /*bResetHitActors*/ false);
+						if (UBulletController* Controller = Subsystem->GetController())
+						{
+							(void)Controller->SetCollisionEnabled(InstanceId, /*bEnabled*/ true, /*bClearOverlaps*/ false);
+						}
 					}
 				}
 			}
-		}
 		return;
 	}
 
@@ -386,11 +408,10 @@ void UANS_SpawnBullet::OnEnd_Implementation(USkeletalMeshComponent* MeshComp, UA
 
 	if (OwnerActor->GetLocalRole() == ROLE_SimulatedProxy)
 	{
-		const int32 InstanceId = BulletComp->GetInstanceIdByKey(Key);
+		const int32 InstanceId = BulletComp->ConsumeOldestInstanceIdByKey(Key);
 		if (InstanceId != INDEX_NONE)
 		{
 			(void)BulletComp->DestroyBullet(InstanceId);
-			BulletComp->RemoveInstanceKey(Key);
 		}
 		return;
 	}
@@ -409,10 +430,9 @@ void UANS_SpawnBullet::OnEnd_Implementation(USkeletalMeshComponent* MeshComp, UA
 		return;
 	}
 
-	const int32 InstanceId = BulletComp->GetInstanceIdByKey(Key);
+	const int32 InstanceId = BulletComp->ConsumeOldestInstanceIdByKey(Key);
 	if (InstanceId != INDEX_NONE)
 	{
 		(void)BulletComp->DestroyBullet(InstanceId);
-		BulletComp->RemoveInstanceKey(Key);
 	}
 }

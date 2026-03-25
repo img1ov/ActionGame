@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "BulletSystemTypes.h"
 #include "Model/BulletInfo.h"
 #include "BulletSystemBlueprintLibrary.generated.h"
@@ -24,6 +25,11 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|InstanceRegistry")
     static int32 GetInstanceIdByKey(AActor* SourceActor, FName InstanceKey);
 
+    // Consume (remove) the oldest valid instance id for a key from the owner's registry.
+    // Useful for overlapping notify windows where End should destroy the earliest spawned instance for that key.
+    UFUNCTION(BlueprintCallable, Category = "BulletSystem|InstanceRegistry")
+    static int32 ConsumeOldestInstanceIdByKey(AActor* SourceActor, FName InstanceKey);
+
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
     static bool DestroyBullet(const UObject* WorldContextObject, int32 InstanceId);
 
@@ -31,19 +37,16 @@ public:
     static bool IsBulletValid(const UObject* WorldContextObject, int32 InstanceId);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors);
+    static bool SetBulletCollisionEnabled(const UObject* WorldContextObject, int32 InstanceId, bool bEnabled, bool bClearOverlaps);
 
     UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static bool ResetBulletHitActors(const UObject* WorldContextObject, int32 InstanceId);
-
-    UFUNCTION(BlueprintCallable, Category = "BulletSystem", meta = (WorldContext = "WorldContextObject"))
-    static int32 ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse);
+    static int32 ProcessManualHits(const UObject* WorldContextObject, int32 InstanceId, bool bApplyCollisionResponse);
 
     // Collision read-side helpers (runtime access from FBulletInfo).
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Collision")
     static TArray<AActor*> GetBulletHitActors(const FBulletInfo& BulletInfo);
 
-    // Returns actors that were accepted as hits at BulletInfo.CollisionInfo.LastHitTime (typically "this frame").
+    // Returns actors that were accepted in the most recent hit batch.
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Collision")
     static TArray<AActor*> GetBulletHitActorsAtLastHitTime(const FBulletInfo& BulletInfo, float TimeTolerance = 0.001f);
 
@@ -90,6 +93,10 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
     static bool GetPayloadSetByCallerMagnitudeByNameFromPayload(const FBulletPayload& Payload, FName DataName, float& OutMagnitude);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
-    static bool GetPayloadSetByCallerMagnitudeByTagFromPayload(const FBulletPayload& Payload, FGameplayTag DataTag, float& OutMagnitude);
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|Payload")
+	static bool GetPayloadSetByCallerMagnitudeByTagFromPayload(const FBulletPayload& Payload, FGameplayTag DataTag, float& OutMagnitude);
+
+	// HitReact helpers (GAS GameplayEvent payload).
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|HitReact")
+	static bool GetHitReactImpulseFromEventData(const FGameplayEventData& EventData, FHitReactImpulse& OutHitReactImpulse);
 };

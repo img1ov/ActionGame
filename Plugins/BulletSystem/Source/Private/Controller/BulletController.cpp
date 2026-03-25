@@ -229,28 +229,7 @@ void UBulletController::OnAfterTick(float DeltaSeconds) const
         ActionRunner->AfterTick(DeltaSeconds);
     }
 
-    // Frame-end maintenance that must happen after hit logic has run.
-    FlushDeferredHitActorResets();
-
     FlushDestroyedBullets();
-}
-
-void UBulletController::FlushDeferredHitActorResets() const
-{
-    if (!Model || DeferredHitActorsReset.Num() == 0)
-    {
-        DeferredHitActorsReset.Reset();
-        return;
-    }
-
-    for (const int32 InstanceId : DeferredHitActorsReset)
-    {
-        if (FBulletInfo* Info = Model->GetBullet(InstanceId))
-        {
-            Info->CollisionInfo.HitActors.Reset();
-        }
-    }
-    DeferredHitActorsReset.Reset();
 }
 
 // Resolve config by BulletId and enqueue initial actions.
@@ -441,6 +420,45 @@ void UBulletController::CollectManualHitCandidates(FBulletInfo& Info, TArray<FHi
     if (!WorldPtr)
     {
         return;
+    }
+
+#if WITH_EDITOR
+    // Manual hitboxes don't run inside CollisionSystem anymore, so draw debug only when ProcessManualHits queries.
+    ULineBatchComponent* DebugLineBatcher = nullptr;
+    constexpr float DebugDrawLifeTime = 2.0f;
+    const uint32 DebugBatchId = 0xB011E700u ^ static_cast<uint32>(Info.InstanceId);
+    if (bEnableDebugDraw)
+    {
+        DebugLineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::World);
+        if (!DebugLineBatcher)
+        {
+            DebugLineBatcher = WorldPtr->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent);
+        }
+        if (DebugLineBatcher)
+        {
+            DebugLineBatcher->ClearBatch(DebugBatchId);
+        }
+    }
+#endif
+
+    // Manual-hit processing can be invoked from anim notifies in between bullet move ticks.
+    // If the bullet is configured to follow/attach to its owner, ensure we sync the latest transform here so the
+    // overlap/sweep query matches what the player sees (and isn't affected by budgeting move-tick decimation).
+    const bool bShouldAttachToOwner = (Info.MoveInfo.bAttachToOwner || Info.Config.Move.MoveType == EBulletMoveType::Attached);
+    if (bShouldAttachToOwner && Info.InitParams.Owner)
+    {
+        const FTransform OwnerTransform = Info.InitParams.Owner->GetActorTransform();
+        if (!Info.MoveInfo.bAttachedLastTick)
+        {
+            const FTransform BulletTransform(Info.MoveInfo.Rotation, Info.MoveInfo.Location);
+            Info.MoveInfo.AttachedRelativeTransform = BulletTransform.GetRelativeTransform(OwnerTransform);
+        }
+
+        Info.MoveInfo.LastLocation = Info.MoveInfo.Location;
+        const FTransform NewBulletTransform = Info.MoveInfo.AttachedRelativeTransform * OwnerTransform;
+        Info.MoveInfo.Location = NewBulletTransform.GetLocation();
+        Info.MoveInfo.Rotation = NewBulletTransform.GetRotation().Rotator();
+        Info.MoveInfo.bAttachedLastTick = true;
     }
 
     if (Info.bNeedDestroy)
@@ -710,6 +728,47 @@ void UBulletController::CollectManualHitCandidates(FBulletInfo& Info, TArray<FHi
     }
 
     HitsByActor.GenerateValueArray(OutHits);
+
+#if WITH_EDITOR
+    if (DebugLineBatcher)
+    {
+        const bool bAnyHit = HitsByActor.Num() > 0;
+        const FLinearColor Color = bAnyHit ? FLinearColor::Red : FLinearColor::Green;
+
+        const FVector DebugStart = Info.MoveInfo.LastLocation;
+        const FVector DebugEnd = Info.MoveInfo.Location;
+
+        // For sweep mode, draw at End (matches CollisionSystem).
+        const FVector DrawCenter = bOverlapMode ? Center : DebugEnd;
+
+        switch (Info.Config.Base.Shape)
+        {
+        case EBulletShapeType::Sphere:
+        {
+            const float Radius = Info.Config.Base.SphereRadius;
+            DebugLineBatcher->DrawSphere(DrawCenter, Radius, 12, Color, DebugDrawLifeTime, /*DepthPriority*/ 0, /*Thickness*/ 0.0f, DebugBatchId);
+            break;
+        }
+        case EBulletShapeType::Box:
+        {
+            const FVector Extent = Info.Config.Base.BoxExtent;
+            DebugLineBatcher->DrawBox(DrawCenter, Extent, Rotation, Color, DebugDrawLifeTime, /*DepthPriority*/ 0, /*Thickness*/ 0.0f, DebugBatchId);
+            break;
+        }
+        case EBulletShapeType::Capsule:
+        {
+            const float Radius = Info.Config.Base.CapsuleRadius;
+            const float HalfHeight = Info.Config.Base.CapsuleHalfHeight;
+            DebugLineBatcher->DrawCapsule(DrawCenter, HalfHeight, Radius, Rotation, Color, DebugDrawLifeTime, /*DepthPriority*/ 0, /*Thickness*/ 0.0f, DebugBatchId);
+            break;
+        }
+        case EBulletShapeType::Ray:
+        default:
+            DebugLineBatcher->DrawLine(DebugStart, DebugEnd, Color, /*DepthPriority*/ 0, /*Thickness*/ 0.0f, DebugDrawLifeTime, DebugBatchId);
+            break;
+        }
+    }
+#endif
 }
 
 void UBulletController::GetChildInstanceIds(int32 ParentInstanceId, TArray<int32>& OutChildren) const
@@ -726,7 +785,7 @@ int32 UBulletController::GetParentInstanceId(int32 ChildInstanceId) const
     return Model ? Model->GetParentInstanceId(ChildInstanceId) : INDEX_NONE;
 }
 
-bool UBulletController::SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps, bool bResetHitActors) const
+bool UBulletController::SetCollisionEnabled(int32 InstanceId, bool bEnabled, bool bClearOverlaps) const
 {
     if (!Model)
     {
@@ -746,36 +805,10 @@ bool UBulletController::SetCollisionEnabled(int32 InstanceId, bool bEnabled, boo
         Info->CollisionInfo.OverlapActors.Reset();
     }
 
-    if (bResetHitActors)
-    {
-        Info->CollisionInfo.HitActors.Reset();
-        Info->CollisionInfo.HitCount = 0;
-        Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
-    }
-
     return true;
 }
 
-bool UBulletController::ResetHitActors(int32 InstanceId) const
-{
-    if (!Model)
-    {
-        return false;
-    }
-
-    FBulletInfo* Info = Model->GetBullet(InstanceId);
-    if (!Info)
-    {
-        return false;
-    }
-
-    Info->CollisionInfo.HitActors.Reset();
-    Info->CollisionInfo.HitCount = 0;
-    Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
-    return true;
-}
-
-int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActorsBefore, bool bApplyCollisionResponse) const
+int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bApplyCollisionResponse) const
 {
     if (!Model)
     {
@@ -798,38 +831,33 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
         return 0;
     }
 
-    if (bResetHitActorsBefore)
-    {
-        // Treat this manual hit processing as a fresh batch, but defer the "final clear" to frame-end so any hit logic
-        // invoked during this call can still read HitActors in the current frame.
-        Info->CollisionInfo.HitActors.Reset();
-        Info->CollisionInfo.HitCount = 0;
-        Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
-        DeferredHitActorsReset.Add(InstanceId);
-    }
+    // Manual hits are driven by explicit anim notifies (usually single hit frames).
+    // Always reset hit caches up-front so every ProcessManualHits call is a fresh batch.
+    Info->CollisionInfo.HitActors.Reset();
+    Info->CollisionInfo.HitCount = 0;
+    Info->CollisionInfo.LastHitTime = -BIG_NUMBER;
+    Info->CollisionInfo.bHitThisFrame = false;
+    Info->CollisionInfo.LastBatchHitActors.Reset();
 
     TArray<FHitResult> Hits;
     CollectManualHitCandidates(*Info, Hits);
 
     const float WorldTime = GetWorldTimeSeconds();
-    const float HitInterval = Info->Config.Base.HitInterval;
-    int32 AppliedCount = 0;
+    struct FPendingManualHit
+    {
+        AActor* Actor = nullptr;
+        FHitResult Hit;
+    };
 
+    // Phase 1: filter candidates without dispatching OnHit yet.
+    TArray<FPendingManualHit> Pending;
+    Pending.Reserve(Hits.Num());
     for (const FHitResult& Hit : Hits)
     {
         AActor* HitActor = Hit.GetActor();
         if (!HitActor)
         {
             continue;
-        }
-
-        if (const float* LastHit = Info->CollisionInfo.HitActors.Find(HitActor))
-        {
-            // HitInterval <= 0 means "no gating" (hit every time).
-            if (HitInterval > 0.0f && (WorldTime - *LastHit) < HitInterval)
-            {
-                continue;
-            }
         }
 
         if (!Info->bIsSimple && Info->Entity && Info->Entity->GetLogicComponent())
@@ -840,13 +868,57 @@ int32 UBulletController::ProcessManualHits(int32 InstanceId, bool bResetHitActor
             }
         }
 
-        // Only count and gate accepted hits. FilterHit should not consume hit count/intervals.
-        Info->CollisionInfo.HitActors.Add(HitActor, WorldTime);
-        Info->CollisionInfo.HitCount++;
-        Info->CollisionInfo.LastHitTime = WorldTime;
-        Info->CollisionInfo.bHitThisFrame = true;
+        Pending.Add(FPendingManualHit{ HitActor, Hit });
+    }
 
-        const bool bDestroyed = HandleHitResult(*Info, HitActor, Hit, bApplyCollisionResponse);
+    if (Pending.Num() == 0)
+    {
+        return 0;
+    }
+
+    // Phase 2: determine which accepted hits should be processed this call (respects destroy-on-hit / max-hit limits).
+    // We want HitActors to include the *full processed batch* before the first OnHit controller runs.
+    TArray<FPendingManualHit> ToProcess;
+    ToProcess.Reserve(Pending.Num());
+    int32 SimHitCount = Info->CollisionInfo.HitCount;
+    for (const FPendingManualHit& Entry : Pending)
+    {
+        SimHitCount++;
+        ToProcess.Add(Entry);
+
+        if (!bApplyCollisionResponse)
+        {
+            continue;
+        }
+
+        const bool bHitLimitReached = SimHitCount >= Info->Config.Base.MaxHitCount;
+        const bool bDestroyOnHit = Info->Config.Base.bDestroyOnHit || bHitLimitReached;
+        const EBulletCollisionResponse Response = Info->Config.Base.CollisionResponse;
+
+        // If this hit would destroy the bullet, no further hits should be processed this call.
+        if (bHitLimitReached || ((Response == EBulletCollisionResponse::Destroy || Response == EBulletCollisionResponse::Support) && bDestroyOnHit))
+        {
+            break;
+        }
+    }
+
+    // Mark batch hit time and pre-fill HitActors so batch-based logic (e.g. ApplyToAllHitActors) sees a complete set.
+    Info->CollisionInfo.LastHitTime = WorldTime;
+    Info->CollisionInfo.bHitThisFrame = true;
+    Info->CollisionInfo.LastHitBatchId++;
+    Info->CollisionInfo.LastBatchHitActors.Reset(ToProcess.Num());
+    for (const FPendingManualHit& Entry : ToProcess)
+    {
+        Info->CollisionInfo.LastBatchHitActors.Add(Entry.Actor);
+    }
+
+    int32 AppliedCount = 0;
+    for (const FPendingManualHit& Entry : ToProcess)
+    {
+        Info->CollisionInfo.HitActors.Add(Entry.Actor, WorldTime);
+        // Only count consumed hits (destroy-on-hit will stop the loop).
+        Info->CollisionInfo.HitCount++;
+        const bool bDestroyed = HandleHitResult(*Info, Entry.Actor, Entry.Hit, bApplyCollisionResponse);
         AppliedCount++;
         if (bDestroyed)
         {
