@@ -4,6 +4,7 @@
 
 #include "AbilitySystemComponent.h"
 #include "Abilities/ActGameplayAbility.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainRuntime.h"
 #include "NativeGameplayTags.h"
 
 #include "ActAbilitySystemComponent.generated.h"
@@ -11,6 +12,7 @@
 #define UE_API ACTGAME_API
 
 class AActor;
+class FActAbilityChainRuntime;
 class UGameplayAbility;
 class UActAbilityTagRelationshipMapping;
 class UActGameplayAbility;
@@ -33,6 +35,7 @@ class UActAbilitySystemComponent : public UAbilitySystemComponent
 public:
 	
 	UE_API UActAbilitySystemComponent(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+	UE_API virtual ~UActAbilitySystemComponent() override;
 
 	UE_API virtual void InitAbilityActorInfo(AActor* InOwnerActor, AActor* InAvatarActor) override;
 
@@ -81,9 +84,6 @@ public:
 	/** Returns the cached spec handle for an AbilityID, or invalid if missing. */
 	UE_API FGameplayAbilitySpecHandle GetAbilitySpecHandleByID(FName AbilityID) const;
 
-	/** Resolves an AbilityID from an input command tag (InputTag). */
-	UE_API bool GetAbilityIdByInputTag(FGameplayTag InputTag, FName& OutAbilityId) const;
-
 	/** Tries to activate one granted ability by AbilityID. */
 	UE_API bool TryActivateAbilityByID(
 		FName AbilityID,
@@ -97,6 +97,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="AbilityInputTagReleased")
 	UE_API void K2_AbilityInputTagReleased(const FGameplayTag InputTag);
 
+	UE_API void ResetAbilityChainRuntime();
+	UE_API bool HasActiveAbilityChain() const;
+	UE_API bool CanActivateAbilityForChain(const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const;
+	UE_API void BeginAbilityChain(UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
+	UE_API void EndAbilityChain(const UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
+	UE_API void EnterAbilityChainNode(FName NodeId);
+	UE_API void OpenAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject);
+	UE_API void CloseAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject);
+	UE_API FActAbilityChainCommandResolveResult ResolveAbilityChainCommand(const FGameplayTag& CommandTag, bool bAllowAbilityActivation);
+	UE_API bool ApplyReplicatedAbilityChainTransition(const FActAbilityChainReplicatedTransition& Transition);
+	UE_API FName GetInitialAbilityChainSection(const UActGameplayAbility& Ability) const;
+	
 	UE_API void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
 	UE_API void ClearAbilityInput();
 	
@@ -121,9 +133,13 @@ public:
 protected:
 
 	UE_API virtual void ClientTryActivateAbility_Implementation(FGameplayAbilitySpecHandle AbilityToActivate) override;
+	UE_API virtual void ClientActivateAbilityFailed_Implementation(FGameplayAbilitySpecHandle AbilityToActivate, int16 PredictionKey) override;
 	UE_API virtual void OnGiveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRemoveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRep_ActivateAbilities() override;
+	UE_API virtual void NotifyAbilityCommit(UGameplayAbility* Ability) override;
+	UE_API virtual void NotifyAbilityActivated(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability) override;
+	UE_API virtual void NotifyAbilityFailed(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability, const FGameplayTagContainer& FailureReason) override;
 	
 	UE_API virtual void AbilitySpecInputPressed(FGameplayAbilitySpec& Spec) override;
 	UE_API virtual void AbilitySpecInputReleased(FGameplayAbilitySpec& Spec) override;
@@ -150,6 +166,8 @@ protected:
 
 	// Number of abilities running in each activation group.
 	int32 ActivationGroupCounts[(uint8)EActAbilityActivationGroup::MAX];
+
+	TUniquePtr<FActAbilityChainRuntime> AbilityChainRuntime;
 };
 
 #undef UE_API

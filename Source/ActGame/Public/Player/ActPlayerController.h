@@ -5,7 +5,7 @@
 #include "AbilitySystemInterface.h"
 #include "CommonPlayerController.h"
 #include "Input/ActBattleInputAnalyzer.h"
-#include "Input/ActCommandRuntimeResolver.h"
+#include "Input/ActBattleCommandResolver.h"
 #include "Teams/ActTeamAgentInterface.h"
 
 #include "ActPlayerController.generated.h"
@@ -77,11 +77,7 @@ public:
 	/** Debug/inspection only: analyzer internals are not mutation API. */
 	UE_API const FActBattleInputAnalyzer* GetInputAnalyzer() const { return BattleInputAnalyzer.Get(); }
 	
-	/** Ability Chain */
-	UE_API void RegisterAbilityChainWindow(FName WindowId, const TArray<FActAbilityChainEntry>& ChainEntries);
-	UE_API void UnregisterAbilityChainWindow(FName WindowId);
 	UE_API void ClearAbilityChainCache();
-	/** ~End of Ability Chain */
 	
 protected:
 	
@@ -113,6 +109,9 @@ protected:
 	void HandleInputCommandMatched(const FGameplayTag& CommandTag) const;
 	void BuildAnalyzerStateTags(FGameplayTagContainer& OutStateTags) const;
 	double GetAnalyzerCurrentTimeSeconds() const;
+	void ResolveBufferedCommand(UActAbilitySystemComponent& ActASC);
+	void DebugPrintCommandExecution(const FGameplayTag& CommandTag) const;
+	void ResetCommandInputBuffer();
 	/* ~End of Input Analyzer */
 
 private:
@@ -130,15 +129,18 @@ private:
 	UFUNCTION()
 	void OnPlayerStateChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam);
 
+	UFUNCTION(Server, Reliable)
+	void ServerRelayAbilityChainTransition(FActAbilityChainReplicatedTransition Transition);
+
 private:
 	
 	TUniquePtr<FActBattleInputAnalyzer> BattleInputAnalyzer;
-	TUniquePtr<FActCommandRuntimeResolver> ComboRuntime;
+	TUniquePtr<FActBattleCommandResolver> ComboRuntime;
 	FActInputCommandMatched InputCommandMatched;
 	EInputDirection CurrentAnalyzerDirection = EInputDirection::Neutral;
 	TArray<FGameplayTag> PendingAbilityInputPressed;
 	TArray<FGameplayTag> PendingAbilityInputReleased;
-	bool bCommandMatchedThisFrame = false;
+	TMap<FGameplayTag, double> ActiveAbilityInputTagLastSeenTimes;
 };
 
 #undef UE_API

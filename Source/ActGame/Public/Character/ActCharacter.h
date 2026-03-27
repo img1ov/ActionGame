@@ -15,6 +15,7 @@
 class UActCharacterMovementComponent;
 class UActCameraComponent;
 class UActSpringArmComponent;
+class UActBattleComponent;
 class AActPlayerState;
 class AActPlayerController;
 class UActPawnData;
@@ -189,6 +190,9 @@ private:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UActPawnExtensionComponent> PawnExtComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UActBattleComponent> BattleComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UBulletSystemComponent> BulletSystemComponent;

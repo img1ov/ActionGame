@@ -15,6 +15,49 @@
 
 class UAbilitySystemComponent;
 
+namespace
+{
+    FVector BuildHitReactImpulseFromAttackerSpace(
+        const FVector& LocalImpulse,
+        const AActor* SourceActor,
+        const AActor* TargetActor,
+        const FHitResult& TargetHit)
+    {
+        if (LocalImpulse.IsNearlyZero() || !SourceActor || !TargetActor)
+        {
+            return LocalImpulse;
+        }
+
+        FVector TargetPosition = TargetHit.ImpactPoint;
+        if (!TargetHit.bBlockingHit || TargetPosition.IsNearlyZero())
+        {
+            TargetPosition = TargetActor->GetActorLocation();
+        }
+
+        FVector AwayFromAttacker = TargetPosition - SourceActor->GetActorLocation();
+        AwayFromAttacker.Z = 0.0f;
+        if (AwayFromAttacker.IsNearlyZero())
+        {
+            AwayFromAttacker = SourceActor->GetActorForwardVector();
+            AwayFromAttacker.Z = 0.0f;
+        }
+
+        if (AwayFromAttacker.IsNearlyZero())
+        {
+            return LocalImpulse;
+        }
+
+        AwayFromAttacker.Normalize();
+        FVector Right = FVector::CrossProduct(FVector::UpVector, AwayFromAttacker).GetSafeNormal();
+        if (Right.IsNearlyZero())
+        {
+            Right = SourceActor->GetActorRightVector();
+        }
+
+        return Right * LocalImpulse.X + AwayFromAttacker * LocalImpulse.Y + FVector::UpVector * LocalImpulse.Z;
+    }
+}
+
 void UBulletLogicCreateBulletController::OnBegin(FBulletInfo& BulletInfo)
 {
     OnHit(BulletInfo, FHitResult());
@@ -257,9 +300,15 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 		{
 			if (!World->IsNetMode(NM_Client))
 			{
-				const FHitReactImpulse& HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
+				FHitReactImpulse HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
 				if (HitReactImpulse.HitReactTag.IsValid())
 				{
+					HitReactImpulse.ImpulseVector = BuildHitReactImpulseFromAttackerSpace(
+						HitReactImpulse.ImpulseVector,
+						SourceActor,
+						TargetActor,
+						TargetHit);
+
 					FGameplayAbilityTargetDataHandle TargetData;
 					FHitReactImpulseTargetData* HitReactTargetData = new FHitReactImpulseTargetData();
 					HitReactTargetData->HitReactImpulse = HitReactImpulse;

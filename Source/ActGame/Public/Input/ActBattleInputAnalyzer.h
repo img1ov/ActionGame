@@ -219,20 +219,44 @@ public:
 
 public:
 	
+	/**
+	 * Records a "pressed" style input event into history and attempts to match commands.
+	 *
+	 * @param InputTag Ability input tag that was pressed (e.g. InputTag.Attack.Light).
+	 * @param InputTimeSeconds World time when event occurred.
+	 * @param InputDirection Quantized character-relative direction at that time.
+	 * @param StateTags Snapshot of gameplay state tags at that time (used for conditional commands).
+	 */
 	void AddInputTagPressed(const FGameplayTag& InputTag, double InputTimeSeconds, EInputDirection InputDirection, const FGameplayTagContainer& StateTags);
+
+	/**
+	 * Records a directional input change (WASD / stick direction).
+	 * This can be used for quarter-circles or directional preconditions.
+	 */
 	void AddDirectionalInput(EInputDirection InputDirection, double InputTimeSeconds, const FGameplayTagContainer& StateTags);
 
+	/** Clears the input history ring buffer. */
 	void ResetInputHistory();
+	/** Clears the matched command ring buffer (already emitted commands). */
 	void ResetMatchedCommands();
+	/** Clears both history and matched commands. */
+	void ResetCommandBuffer();
+	/** Per-frame housekeeping: prunes expired history and command buffers. */
 	void Tick(double CurrentTimeSeconds);
 
+	/** Updates the list of command definitions the analyzer will attempt to match. */
 	void SetCommandDefinitions(const TArray<FInputCommandDefinition>& InCommandDefinitions);
+	/** Callback invoked when a command is matched and added into the command buffer. */
 	void SetOnCommandMatchedDelegate(FActOnInputCommandMatched InOnCommandMatched);
 
+	/** Returns the input history for debugging/UI. */
 	void GetInputHistory(TArray<FInputHistoryEntry>& OutEntries, bool bFromOldest = true) const;
+	/** Peeks the oldest buffered matched command if it is still alive. */
 	bool PeekMatchedCommand(double CurrentTimeSeconds, FGameplayTag& OutCommandTag);
+	/** Pops the oldest buffered matched command if it is still alive. */
 	bool ConsumeMatchedCommand(double CurrentTimeSeconds, FGameplayTag& OutCommandTag);
-	void BuildDebugLines(TArray<FString>& OutLines) const;
+	/** Builds debug lines to help visualize what matched/why. */
+	void BuildDebugLines(TArray<FString>& OutLines, const FGameplayTag& CommandTag = FGameplayTag()) const;
 
 private:
 	
@@ -246,21 +270,29 @@ private:
 
 	void AddInputEntry(const FInputHistoryEntry& InputEntry);
 	void PruneExpiredInputHistory(double CurrentTimeSeconds);
+	void PruneExpiredMatchedCommands(double CurrentTimeSeconds);
 	void TryMatchCommands(const FInputHistoryEntry& LatestEntry);
 	bool DoesStepMatchEntry(const FInputCommandStep& Step, const FInputHistoryEntry& Entry, double LastMatchedTimeSeconds) const;
 	bool IsEntryEventTypeMatch(ECommandEventMatchType ExpectedEventType, EAnalyzerEventType ActualEventType) const;
 
 private:
 	
-	static constexpr double MatchedCommandIdleTimeoutSeconds = 0.25;
 	static constexpr double InputHistoryMaxAgeSeconds = 1.0;
 
+	/** Authoritative command definitions (usually configured from PawnData). */
 	TArray<FInputCommandDefinition> CommandDefinitions;
+	/** Ring buffer of recent input samples. */
 	TFixedRingBuffer<FInputHistoryEntry, InputHistoryCapacity> InputHistory;
+	/** Ring buffer of matched command outputs (acts as a command buffer). */
 	TFixedRingBuffer<FMatchedCommandEntry, MatchedCommandCapacity> MatchedCommands;
+	/** Last known directional input (used to coalesce/avoid duplicate events). */
 	EInputDirection LastDirectionalInput = EInputDirection::Neutral;
+	/** Last input time; used for pruning and debug. */
 	double LastInputTimeSeconds = -1.0;
+	/** De-dup guard for emitting the same command repeatedly in the same frame window. */
 	FGameplayTag LastEmittedCommandTag;
+	/** Time when LastEmittedCommandTag was pushed. */
 	double LastEmittedCommandTimeSeconds = -1.0;
+	/** External listener (usually PlayerController) notified on match. */
 	FActOnInputCommandMatched OnCommandMatched;
 };

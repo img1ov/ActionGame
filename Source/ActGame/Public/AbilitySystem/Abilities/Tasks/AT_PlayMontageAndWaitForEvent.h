@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Abilities/Tasks/AbilityTask.h"
+#include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 
 #include "AT_PlayMontageAndWaitForEvent.generated.h"
 
@@ -52,6 +53,7 @@ public:
 	);
 	
 	virtual void Activate() override;
+	virtual void TickTask(float DeltaTime) override;
 	virtual void ExternalCancel() override;
 	virtual FString GetDebugString() const override;
 	virtual void OnDestroy(bool bInOwnerFinished) override;
@@ -60,6 +62,9 @@ private:
 
 	/** Checks if the ability is playing a montage and stops that montage, returns true if a montage was stopped, false if not. */
 	bool StopPlayingMontage();
+	bool RefreshPredictedMotionForSection(const FName SectionName);
+	FName GetCurrentMontageSectionName() const;
+	int32 GetOrCreateMotionSyncId() const;
 
 	/** Returns our ability system component */
 	UActAbilitySystemComponent* GetActAbilitySystemComponent();
@@ -121,5 +126,14 @@ private:
 	/** Rather montage should be aborted if ability ends */
 	UPROPERTY()
 	bool bStopWhenAbilityEnds;
+
+	UPROPERTY()
+	FActMontageRootMotionSourceSettings RootMotionSourceSettings;
+
+	uint16 RootMotionSourceID = 0;
+	int32 AddMoveHandle = INDEX_NONE;
+	bool bPushedDisableRootMotion = false;
+	FName LastAppliedMotionSection = NAME_None;
+	mutable int32 MotionSyncId = INDEX_NONE;
 	
 };

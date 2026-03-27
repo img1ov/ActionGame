@@ -35,9 +35,9 @@ public:
 	
 	UE_API UActHeroComponent(const FObjectInitializer& ObjectInitializer);
 
-	/** Returns the battle component if one exists on the specified actor. */
-	UFUNCTION(BlueprintPure, Category="Act|Battle")
-	static UActHeroComponent* FindBattleComponent(const AActor* Actor){ return (Actor ? Actor->FindComponentByClass<UActHeroComponent>() : nullptr);}
+	/** Returns the hero component if one exists on the specified actor. */
+	UFUNCTION(BlueprintPure, Category="Act")
+	static UActHeroComponent* FindHeroComponent(const AActor* Actor){ return (Actor ? Actor->FindComponentByClass<UActHeroComponent>() : nullptr);}
 
 	/** True if this is controlled by a real player and has progressed far enough in initialization where additional input bindings can be added */
 	UE_API bool IsReadyToBindInputs() const;

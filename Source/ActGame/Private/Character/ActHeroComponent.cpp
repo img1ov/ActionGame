@@ -8,6 +8,7 @@
 #include "EnhancedInputSubsystemInterface.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
+#include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
 #include "Components/GameFrameworkComponentManager.h"
@@ -330,8 +331,7 @@ void UActHeroComponent::InitializePlayerInput(UInputComponent* PlayerInputCompon
 					// Add the key mappings that may have been set by the player
 					ActIC->AddInputMappings(InputConfig, InputSubsystem);
 
-					// This is where we actually bind and input action to a gameplay tag, which means that Gameplay Ability Blueprints will
-					// be triggered directly by these input actions Triggered events.
+					// Bind gameplay input tags through the configured press/release events on the input config.
 					TArray<uint32> BindHandles;
 					ActIC->BindAbilityActions(InputConfig, this, &ThisClass::Input_AbilityInputTagPressed, &ThisClass::Input_AbilityInputTagReleased, /*out*/BindHandles);
 					
@@ -408,6 +408,7 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 	}
 
 	const FVector2D Value = InputActionValue.Get<FVector2D>();
+
 	const FRotator ControlRot(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FVector WorldMoveVector = ControlRot.RotateVector(FVector(Value.Y, Value.X, 0.f));
 

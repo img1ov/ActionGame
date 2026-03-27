@@ -6,15 +6,46 @@
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilityTagRelationshipMapping.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainRuntime.h"
 #include "Abilities/GameplayAbility.h"
+#include "Abilities/GameplayAbilityRepAnimMontage.h"
 #include "Animation/ActAnimInstance.h"
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_Gameplay_AbilityInputBlocked, "Gameplay.AbilityInputBlocked");
 
+namespace
+{
+double GetASCLogTimeSeconds(const UActAbilitySystemComponent* ASC)
+{
+	const UWorld* World = ASC ? ASC->GetWorld() : nullptr;
+	return World ? World->GetTimeSeconds() : 0.0;
+}
+
+FString GetASCActorName(const UActAbilitySystemComponent* ASC)
+{
+	const FGameplayAbilityActorInfo* ActorInfo = ASC ? ASC->AbilityActorInfo.Get() : nullptr;
+	return GetNameSafe(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
+}
+
+FString GetAbilityDebugName(const UGameplayAbility* Ability)
+{
+	if (const UActGameplayAbility* ActAbility = Cast<UActGameplayAbility>(Ability))
+	{
+		return FString::Printf(TEXT("%s(%s)"), *GetNameSafe(ActAbility), *ActAbility->GetAbilityID().ToString());
+	}
+
+	return GetNameSafe(Ability);
+}
+}
+
 UActAbilitySystemComponent::UActAbilitySystemComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	AbilityChainRuntime = MakeUnique<FActAbilityChainRuntime>();
+	SetMontageRepAnimPositionMethod(ERepAnimPositionMethod::CurrentSectionId);
 }
+
+UActAbilitySystemComponent::~UActAbilitySystemComponent() = default;
 
 void UActAbilitySystemComponent::InitAbilityActorInfo(AActor* InOwnerActor, AActor* InAvatarActor)
 {
@@ -24,14 +55,102 @@ void UActAbilitySystemComponent::InitAbilityActorInfo(AActor* InOwnerActor, AAct
 	
 	Super::InitAbilityActorInfo(InOwnerActor, InAvatarActor);
 
+	ResetAbilityChainRuntime();
+	SetMontageRepAnimPositionMethod(ERepAnimPositionMethod::CurrentSectionId);
+
 	if (UActAnimInstance* ActAnimInst = Cast<UActAnimInstance>(ActorInfo->GetAnimInstance()))
 	{
 		ActAnimInst->InitializeWithAbilitySystem(this);
 	}
 }
 
+void UActAbilitySystemComponent::ResetAbilityChainRuntime()
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->Reset();
+	}
+}
+
+bool UActAbilitySystemComponent::HasActiveAbilityChain() const
+{
+	return AbilityChainRuntime.IsValid() && AbilityChainRuntime->HasActiveChain();
+}
+
+bool UActAbilitySystemComponent::CanActivateAbilityForChain(const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const
+{
+	return !AbilityChainRuntime.IsValid() || AbilityChainRuntime->CanActivateAbility(*this, Ability, OptionalRelevantTags);
+}
+
+void UActAbilitySystemComponent::BeginAbilityChain(UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->BeginAbility(*this, Ability, SpecHandle);
+	}
+}
+
+void UActAbilitySystemComponent::EndAbilityChain(const UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->EndAbility(*this, Ability, SpecHandle);
+	}
+}
+
+void UActAbilitySystemComponent::EnterAbilityChainNode(const FName NodeId)
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->EnterNode(*this, NodeId);
+	}
+}
+
+void UActAbilitySystemComponent::OpenAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject)
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->OpenWindow(*this, WindowTag, SourceObject);
+	}
+}
+
+void UActAbilitySystemComponent::CloseAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject)
+{
+	if (AbilityChainRuntime.IsValid())
+	{
+		AbilityChainRuntime->CloseWindow(*this, WindowTag, SourceObject);
+	}
+}
+
+FActAbilityChainCommandResolveResult UActAbilitySystemComponent::ResolveAbilityChainCommand(const FGameplayTag& CommandTag, const bool bAllowAbilityActivation)
+{
+	if (!AbilityChainRuntime.IsValid())
+	{
+		return FActAbilityChainCommandResolveResult();
+	}
+
+	return AbilityChainRuntime->ResolveCommand(*this, CommandTag, bAllowAbilityActivation);
+}
+
+bool UActAbilitySystemComponent::ApplyReplicatedAbilityChainTransition(const FActAbilityChainReplicatedTransition& Transition)
+{
+	return AbilityChainRuntime.IsValid() && AbilityChainRuntime->ApplyReplicatedTransition(*this, Transition);
+}
+
+FName UActAbilitySystemComponent::GetInitialAbilityChainSection(const UActGameplayAbility& Ability) const
+{
+	if (!AbilityChainRuntime.IsValid())
+	{
+		return NAME_None;
+	}
+
+	return AbilityChainRuntime->GetInitialSectionForAbility(Ability);
+}
+
 void UActAbilitySystemComponent::CancelAbilitiesByFunc(const TShouldCancelAbilityFunc& ShouldCancelFunc, const bool bReplicateCancelAbility)
 {
+	(void)bReplicateCancelAbility;
+
 	ABILITYLIST_SCOPE_LOCK();
 
 	for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
@@ -64,7 +183,7 @@ void UActAbilitySystemComponent::CancelAbilitiesByFunc(const TShouldCancelAbilit
 			{
 				if (ActAbilityInstance->CanBeCanceled())
 				{
-					ActAbilityInstance->CancelAbility(AbilitySpec.Handle, AbilityActorInfo.Get(), ActAbilityInstance->GetCurrentActivationInfo(), bReplicateCancelAbility);
+					CancelAbilityHandle(AbilitySpec.Handle);
 				}
 				else
 				{
@@ -77,7 +196,7 @@ void UActAbilitySystemComponent::CancelAbilitiesByFunc(const TShouldCancelAbilit
 
 void UActAbilitySystemComponent::CancelInputActivatedAbilities(bool bReplicateCancelAbility)
 {
-	auto ShouldCancelFunc = [this](const UActGameplayAbility* ActAbility, FGameplayAbilitySpecHandle Handle)
+	auto ShouldCancelFunc = [this](const UActGameplayAbility* ActAbility, FGameplayAbilitySpecHandle /*Handle*/)
 	{
 		const EActAbilityActivationPolicy ActivationPolicy = ActAbility->GetActivationPolicy();
 		return ((ActivationPolicy == EActAbilityActivationPolicy::OnInputTriggered) || (ActivationPolicy == EActAbilityActivationPolicy::WhileInputActive));
@@ -90,6 +209,13 @@ void UActAbilitySystemComponent::AbilityInputTagPressed(const FGameplayTag Input
 {
 	if (InputTag.IsValid())
 	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleInput] Pressed. Owner=%s Tag=%s Local=%d Auth=%d Time=%.3f"),
+			*GetASCActorName(this),
+			*InputTag.ToString(),
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+			GetASCLogTimeSeconds(this));
+
 		for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
 		{
 			if (AbilitySpec.Ability && AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))
@@ -105,6 +231,13 @@ void UActAbilitySystemComponent::AbilityInputTagTriggered(const FGameplayTag Inp
 {
 	if (InputTag.IsValid())
 	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleInput] Triggered. Owner=%s Tag=%s Local=%d Auth=%d Time=%.3f"),
+			*GetASCActorName(this),
+			*InputTag.ToString(),
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+			GetASCLogTimeSeconds(this));
+
 		for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
 		{
 			if (AbilitySpec.Ability && AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))
@@ -120,6 +253,13 @@ void UActAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag Inpu
 {
 	if (InputTag.IsValid())
 	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleInput] Released. Owner=%s Tag=%s Local=%d Auth=%d Time=%.3f"),
+			*GetASCActorName(this),
+			*InputTag.ToString(),
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+			GetASCLogTimeSeconds(this));
+
 		for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
 		{
 			if (AbilitySpec.Ability && AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))
@@ -162,7 +302,24 @@ bool UActAbilitySystemComponent::TryActivateGrantedAbilityByClass(
 			CancelAbilityHandle(AbilitySpec.Handle);
 		}
 
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] TryActivateByClass request. Owner=%s Ability=%s Class=%s Handle=%s Local=%d Auth=%d Time=%.3f"),
+			*GetASCActorName(this),
+			*GetAbilityDebugName(AbilitySpec.Ability),
+			*GetNameSafe(AbilityClass.Get()),
+			*AbilitySpec.Handle.ToString(),
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+			AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+			GetASCLogTimeSeconds(this));
+
 		const bool bRequested = TryActivateAbility(AbilitySpec.Handle, bAllowRemoteActivation);
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] TryActivateByClass result. Owner=%s Ability=%s Class=%s Handle=%s Requested=%d ActiveNow=%d Time=%.3f"),
+			*GetASCActorName(this),
+			*GetAbilityDebugName(AbilitySpec.Ability),
+			*GetNameSafe(AbilityClass.Get()),
+			*AbilitySpec.Handle.ToString(),
+			bRequested,
+			(FindAbilitySpecFromHandle(AbilitySpec.Handle) && FindAbilitySpecFromHandle(AbilitySpec.Handle)->IsActive()) ? 1 : 0,
+			GetASCLogTimeSeconds(this));
 		if (!bRequested)
 		{
 			return false;
@@ -380,41 +537,6 @@ FGameplayAbilitySpecHandle UActAbilitySystemComponent::GetAbilitySpecHandleByID(
 	return FGameplayAbilitySpecHandle();
 }
 
-bool UActAbilitySystemComponent::GetAbilityIdByInputTag(const FGameplayTag InputTag, FName& OutAbilityId) const
-{
-	OutAbilityId = NAME_None;
-
-	if (!InputTag.IsValid())
-	{
-		return false;
-	}
-	
-	for (const FGameplayAbilitySpec& AbilitySpec : ActivatableAbilities.Items)
-	{
-		if (!AbilitySpec.Ability || !AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))
-		{
-			continue;
-		}
-
-		const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec.Ability);
-		if (!ActAbilityCDO)
-		{
-			continue;
-		}
-
-		const FName AbilityID = ActAbilityCDO->GetAbilityID();
-		if (AbilityID.IsNone())
-		{
-			continue;
-		}
-
-		OutAbilityId = AbilityID;
-		return true;
-	}
-
-	return false;
-}
-
 bool UActAbilitySystemComponent::TryActivateAbilityByID(
 	const FName AbilityID,
 	const bool bAllowRemoteActivation,
@@ -449,7 +571,24 @@ bool UActAbilitySystemComponent::TryActivateAbilityByID(
 		}
 	}
 
+	const FGameplayAbilitySpec* AbilitySpec = FindAbilitySpecFromHandle(Handle);
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] TryActivateByID request. Owner=%s AbilityID=%s Ability=%s Handle=%s Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*AbilityID.ToString(),
+		AbilitySpec ? *GetAbilityDebugName(AbilitySpec->Ability) : TEXT("None"),
+		*Handle.ToString(),
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
 	const bool bRequested = TryActivateAbility(Handle, bAllowRemoteActivation);
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] TryActivateByID result. Owner=%s AbilityID=%s Handle=%s Requested=%d ActiveNow=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*AbilityID.ToString(),
+		*Handle.ToString(),
+		bRequested,
+		(FindAbilitySpecFromHandle(Handle) && FindAbilitySpecFromHandle(Handle)->IsActive()) ? 1 : 0,
+		GetASCLogTimeSeconds(this));
 	if (!bRequested)
 	{
 		return false;
@@ -516,7 +655,8 @@ void UActAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGame
 			if (AbilitySpec->Ability && !AbilitySpec->IsActive())
 			{
 				const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec->Ability);
-				if (ActAbilityCDO && ActAbilityCDO->GetActivationPolicy() == EActAbilityActivationPolicy::WhileInputActive)
+				if (ActAbilityCDO &&
+					ActAbilityCDO->GetActivationPolicy() == EActAbilityActivationPolicy::WhileInputActive)
 				{
 					AbilitiesToActive.AddUnique(AbilitySpec->Handle);
 				}
@@ -543,8 +683,8 @@ void UActAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGame
 				else
 				{
 					const UActGameplayAbility* ActAbilityCDO = Cast<UActGameplayAbility>(AbilitySpec->Ability);
-
-					if (ActAbilityCDO && ActAbilityCDO->GetActivationPolicy() == EActAbilityActivationPolicy::OnInputTriggered)
+					if (ActAbilityCDO &&
+						ActAbilityCDO->GetActivationPolicy() == EActAbilityActivationPolicy::OnInputTriggered)
 					{
 						AbilitiesToActive.AddUnique(AbilitySpec->Handle);
 					}
@@ -665,7 +805,29 @@ void UActAbilitySystemComponent::ResetGameplayTagCounts(FGameplayTagContainer Ta
 
 void UActAbilitySystemComponent::ClientTryActivateAbility_Implementation(FGameplayAbilitySpecHandle AbilityToActivate)
 {
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] ClientTryActivateAbility RPC. Owner=%s Handle=%s Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*AbilityToActivate.ToString(),
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
 	Super::ClientTryActivateAbility_Implementation(AbilityToActivate);
+}
+
+void UActAbilitySystemComponent::ClientActivateAbilityFailed_Implementation(FGameplayAbilitySpecHandle AbilityToActivate, int16 PredictionKey)
+{
+	const FGameplayAbilitySpec* AbilitySpec = FindAbilitySpecFromHandle(AbilityToActivate);
+	UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] ClientActivateAbilityFailed RPC. Owner=%s Handle=%s Ability=%s PredictionKey=%d Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*AbilityToActivate.ToString(),
+		AbilitySpec ? *GetAbilityDebugName(AbilitySpec->Ability) : TEXT("None"),
+		PredictionKey,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
+	Super::ClientActivateAbilityFailed_Implementation(AbilityToActivate, PredictionKey);
 }
 
 void UActAbilitySystemComponent::OnGiveAbility(FGameplayAbilitySpec& AbilitySpec)
@@ -716,6 +878,45 @@ void UActAbilitySystemComponent::OnRep_ActivateAbilities()
 	Super::OnRep_ActivateAbilities();
 
 	RebuildAbilityIdCache();
+}
+
+void UActAbilitySystemComponent::NotifyAbilityCommit(UGameplayAbility* Ability)
+{
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] Commit. Owner=%s Ability=%s Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*GetAbilityDebugName(Ability),
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
+	Super::NotifyAbilityCommit(Ability);
+}
+
+void UActAbilitySystemComponent::NotifyAbilityActivated(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability)
+{
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] Activated notify. Owner=%s Handle=%s Ability=%s Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*Handle.ToString(),
+		*GetAbilityDebugName(Ability),
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
+	Super::NotifyAbilityActivated(Handle, Ability);
+}
+
+void UActAbilitySystemComponent::NotifyAbilityFailed(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability, const FGameplayTagContainer& FailureReason)
+{
+	UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] Activate failed notify. Owner=%s Handle=%s Ability=%s Reasons=%s Local=%d Auth=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*Handle.ToString(),
+		*GetAbilityDebugName(Ability),
+		*FailureReason.ToString(),
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
+		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
+		GetASCLogTimeSeconds(this));
+
+	Super::NotifyAbilityFailed(Handle, Ability, FailureReason);
 }
 
 

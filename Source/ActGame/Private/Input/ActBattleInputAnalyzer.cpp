@@ -2,6 +2,48 @@
 
 #include "Input/ActBattleInputAnalyzer.h"
 
+namespace
+{
+const TCHAR* ToEventTypeString(const ECommandEventMatchType Type)
+{
+	switch (Type)
+	{
+		case ECommandEventMatchType::Any: return TEXT("Any");
+		case ECommandEventMatchType::Pressed: return TEXT("Pressed");
+		case ECommandEventMatchType::Direction: return TEXT("Direction");
+		default: return TEXT("Unknown");
+	}
+}
+
+const TCHAR* ToDirectionString(const EInputDirection Dir)
+{
+	switch (Dir)
+	{
+		case EInputDirection::Any: return TEXT("Any");
+		case EInputDirection::Neutral: return TEXT("Neutral");
+		case EInputDirection::Forward: return TEXT("Forward");
+		case EInputDirection::Backward: return TEXT("Backward");
+		case EInputDirection::Left: return TEXT("Left");
+		case EInputDirection::Right: return TEXT("Right");
+		case EInputDirection::ForwardLeft: return TEXT("ForwardLeft");
+		case EInputDirection::ForwardRight: return TEXT("ForwardRight");
+		case EInputDirection::BackwardLeft: return TEXT("BackwardLeft");
+		case EInputDirection::BackwardRight: return TEXT("BackwardRight");
+		default: return TEXT("Unknown");
+	}
+}
+
+FString ToTagsString(const FGameplayTagContainer& Tags)
+{
+	if (Tags.IsEmpty())
+	{
+		return TEXT("None");
+	}
+
+	return Tags.ToString();
+}
+}
+
 void FActBattleInputAnalyzer::AddInputTagPressed(const FGameplayTag& InputTag, const double InputTimeSeconds, const EInputDirection InputDirection, const FGameplayTagContainer& StateTags)
 {
 	if (!InputTag.IsValid())
@@ -52,6 +94,12 @@ void FActBattleInputAnalyzer::ResetMatchedCommands()
 	MatchedCommands.Reset();
 }
 
+void FActBattleInputAnalyzer::ResetCommandBuffer()
+{
+	ResetMatchedCommands();
+	ResetInputHistory();
+}
+
 void FActBattleInputAnalyzer::Tick(const double CurrentTimeSeconds)
 {
 	if (LastInputTimeSeconds < 0.0 || CurrentTimeSeconds < LastInputTimeSeconds)
@@ -59,10 +107,7 @@ void FActBattleInputAnalyzer::Tick(const double CurrentTimeSeconds)
 		return;
 	}
 
-	if ((CurrentTimeSeconds - LastInputTimeSeconds) > MatchedCommandIdleTimeoutSeconds)
-	{
-		ResetMatchedCommands();
-	}
+	PruneExpiredMatchedCommands(CurrentTimeSeconds);
 }
 
 void FActBattleInputAnalyzer::SetCommandDefinitions(const TArray<FInputCommandDefinition>& InCommandDefinitions)
@@ -115,9 +160,54 @@ bool FActBattleInputAnalyzer::PeekMatchedCommand(const double CurrentTimeSeconds
 	return false;
 }
 
-void FActBattleInputAnalyzer::BuildDebugLines(TArray<FString>& OutLines) const
+void FActBattleInputAnalyzer::BuildDebugLines(TArray<FString>& OutLines, const FGameplayTag& CommandTag) const
 {
 	OutLines.Reset();
+
+	if (CommandTag.IsValid())
+	{
+		const FInputCommandDefinition* Definition = nullptr;
+		for (const FInputCommandDefinition& CommandDefinition : CommandDefinitions)
+		{
+			if (CommandDefinition.OutputCommandTag == CommandTag)
+			{
+				Definition = &CommandDefinition;
+				break;
+			}
+		}
+
+		if (!Definition)
+		{
+			OutLines.Add(FString::Printf(
+				TEXT("[BattleCommandResolver] Command=%s (definition not found)"),
+				*CommandTag.ToString()));
+			return;
+		}
+
+		OutLines.Reserve(Definition->Steps.Num() + 1);
+		OutLines.Add(FString::Printf(
+			TEXT("[BattleCommandResolver] Command=%s Priority=%d Steps=%d Buffer=%.3fs RequiredTags=%s"),
+			*Definition->OutputCommandTag.ToString(),
+			Definition->Priority,
+			Definition->Steps.Num(),
+			Definition->BufferLifetimeSeconds,
+			*ToTagsString(Definition->RequiredStateTags)));
+
+		for (int32 StepIndex = 0; StepIndex < Definition->Steps.Num(); ++StepIndex)
+		{
+			const FInputCommandStep& Step = Definition->Steps[StepIndex];
+			OutLines.Add(FString::Printf(
+				TEXT("  Step[%d] Tag=%s Event=%s Dir=%s Gap<=%.3f RequiredTags=%s"),
+				StepIndex,
+				*Step.InputTag.ToString(),
+				ToEventTypeString(Step.EventType),
+				ToDirectionString(Step.RequiredDirection),
+				Step.AllowedTimeGap,
+				*ToTagsString(Step.RequiredStateTags)));
+		}
+
+		return;
+	}
 
 	TArray<FInputHistoryEntry> Entries;
 	GetInputHistory(Entries, true);
@@ -180,6 +270,26 @@ void FActBattleInputAnalyzer::PruneExpiredInputHistory(const double CurrentTimeS
 	}
 }
 
+void FActBattleInputAnalyzer::PruneExpiredMatchedCommands(const double CurrentTimeSeconds)
+{
+	if (MatchedCommands.IsEmpty())
+	{
+		return;
+	}
+
+	while (!MatchedCommands.IsEmpty())
+	{
+		const FMatchedCommandEntry Entry = MatchedCommands.GetOldest(0);
+		if (Entry.ExpireTimeSeconds >= CurrentTimeSeconds)
+		{
+			break;
+		}
+
+		FMatchedCommandEntry Discarded;
+		MatchedCommands.TryPopOldest(Discarded);
+	}
+}
+
 void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestEntry)
 {
 	if (InputHistory.IsEmpty())
@@ -222,6 +332,10 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 
 		// Edge-triggered matching: a command can only emit when the newest sample
 		// satisfies the final step. This prevents re-emits from unrelated later input.
+		//
+		// Example:
+		// - "LightAttack" might be a single pressed step.
+		// - Without edge-trigger, any later directional event could repeatedly re-match it.
 		const FInputCommandStep& FinalStep = CommandDefinition.Steps.Last();
 		if (!DoesStepMatchEntry(FinalStep, LatestEntry, -1.0))
 		{
@@ -237,7 +351,8 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 			const FInputCommandStep& Step = CommandDefinition.Steps[StepIndex];
 
 			// Loose matching: unrelated events are skipped rather than treated as hard breaks.
-			// This is intentional for action-game style input tolerance.
+			// This is intentional for action-game style input tolerance (you can wiggle stick without
+			// destroying a partially-entered command).
 			if (!DoesStepMatchEntry(Step, Entry, LastMatchedTimeSeconds))
 			{
 				continue;
@@ -275,6 +390,11 @@ void FActBattleInputAnalyzer::TryMatchCommands(const FInputHistoryEntry& LatestE
 		Entry.Priority = BestMatch.Priority;
 		Entry.CreatedTimeSeconds = LastInputTimeSeconds;
 		Entry.ExpireTimeSeconds = LastInputTimeSeconds + BestMatch.BufferLifetimeSeconds;
+
+		// Command buffering policy:
+		// we keep only the newest accepted command (single-slot buffer).
+		// This avoids ambiguous multi-command queues and matches common action-game feel.
+		MatchedCommands.Reset();
 		MatchedCommands.Add(Entry);
 
 		LastEmittedCommandTag = BestMatch.CommandTag;

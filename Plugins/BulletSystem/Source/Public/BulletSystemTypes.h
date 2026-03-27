@@ -127,7 +127,8 @@ struct FHitReactImpulse
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     EImpactDirection VisualImpactDirection;
 
-    // Impulse direction/amount. Interpretation is up to the target hit-react blueprint/GA.
+    // Impulse direction/amount in attacker-relative space:
+    // +Y = away from attacker, +X = attacker-right, +Z = world up.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     FVector ImpulseVector = FVector::ZeroVector;
 

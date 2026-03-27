@@ -8,6 +8,7 @@
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "Camera/ActCameraComponent.h"
 #include "Camera/ActSpringArmComponent.h"
+#include "Character/ActBattleComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -51,6 +52,8 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 	PawnExtComponent = CreateDefaultSubobject<UActPawnExtensionComponent>(TEXT("PawnExtensionComponent"));
 	PawnExtComponent->OnAbilitySystemInitialized_RegisterAndCall(FSimpleMulticastDelegate::FDelegate::CreateUObject(this, &ThisClass::OnAbilitySystemInitialized));
 	PawnExtComponent->OnAbilitySystemUninitialized_Register(FSimpleMulticastDelegate::FDelegate::CreateUObject(this, &ThisClass::OnAbilitySystemUninitialized));
+
+	BattleComponent = CreateDefaultSubobject<UActBattleComponent>(TEXT("BattleComponent"));
 
 	HealthComponent = CreateDefaultSubobject<UActHealthComponent>(TEXT("HealthComponent"));
 	HealthComponent->OnDeathStarted.AddDynamic(this, &ThisClass::OnDeathStarted);

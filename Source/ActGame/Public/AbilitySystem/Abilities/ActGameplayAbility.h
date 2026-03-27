@@ -3,10 +3,13 @@
 #pragma once
 
 #include "Abilities/GameplayAbility.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainTypes.h"
+#include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 
 #include "ActGameplayAbility.generated.h"
 
 class AActCharacter;
+class UActAbilityChainData;
 class UActAbilitySystemComponent;
 
 /**
@@ -73,11 +76,19 @@ public:
 
 	/** Authoring identifier used by runtime chain resolution and ID-based activation. */
 	FName GetAbilityID() const { return AbilityID; }
+
+	UActAbilityChainData* GetAbilityChainData() const { return AbilityChainData; }
+	EActAbilityChainActivationMode GetAbilityChainActivationMode() const { return AbilityChainActivationMode; }
+	FName GetInitialAbilityChainSection() const;
+	const FActMontageRootMotionSourceSettings& GetMontageRootMotionSourceSettings() const { return MontageRootMotionSourceSettings; }
 	
 protected:
 	//~UGameplayAbility interface
 	virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayTagContainer* SourceTags = nullptr, const FGameplayTagContainer* TargetTags = nullptr, FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
 	virtual bool DoesAbilitySatisfyTagRequirements(const UAbilitySystemComponent& AbilitySystemComponent, const FGameplayTagContainer* SourceTags = nullptr, const FGameplayTagContainer* TargetTags = nullptr, FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+	virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData) override;
+	virtual void CancelAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateCancelAbility) override;
+	virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
 	virtual void OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
 	//~End of UGameplayAbility interface
 
@@ -92,4 +103,13 @@ protected:
 	// Stable authoring ID for runtime lookup/activation (set per ability asset).
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability")
 	FName AbilityID;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Chain")
+	TObjectPtr<UActAbilityChainData> AbilityChainData;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Chain")
+	EActAbilityChainActivationMode AbilityChainActivationMode = EActAbilityChainActivationMode::Ignore;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Motion")
+	FActMontageRootMotionSourceSettings MontageRootMotionSourceSettings;
 };

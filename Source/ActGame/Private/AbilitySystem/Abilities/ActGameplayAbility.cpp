@@ -5,9 +5,25 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "ActLogChannels.h"
 #include "ActGameplayTags.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
+#include "AbilitySystem/AbilityChain/ActAbilityChainData.h"
 #include "Character/ActCharacter.h"
+
+namespace
+{
+double GetAbilityLogTimeSeconds(const FGameplayAbilityActorInfo* ActorInfo)
+{
+	const UWorld* World = ActorInfo && ActorInfo->AvatarActor.IsValid() ? ActorInfo->AvatarActor->GetWorld() : nullptr;
+	return World ? World->GetTimeSeconds() : 0.0;
+}
+
+FString GetAbilityOwnerName(const FGameplayAbilityActorInfo* ActorInfo)
+{
+	return GetNameSafe(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
+}
+}
 
 UActGameplayAbility::UActGameplayAbility(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -56,15 +72,41 @@ void UActGameplayAbility::TryActivateAbilityOnSpawn(const FGameplayAbilityActorI
 	}
 }
 
+FName UActGameplayAbility::GetInitialAbilityChainSection() const
+{
+	if (!AbilityChainData)
+	{
+		return NAME_None;
+	}
+
+	if (const UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
+	{
+		return ActASC->GetInitialAbilityChainSection(*this);
+	}
+
+	return AbilityChainData->GetStartSectionName();
+}
+
 bool UActGameplayAbility::CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayTagContainer* SourceTags, const FGameplayTagContainer* TargetTags, FGameplayTagContainer* OptionalRelevantTags) const
 {
 	if (!ActorInfo || !ActorInfo->AbilitySystemComponent.IsValid())
 	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityID=%s Owner=%s Reason=InvalidActorInfo Time=%.3f"),
+			*GetNameSafe(this),
+			*AbilityID.ToString(),
+			*GetAbilityOwnerName(ActorInfo),
+			GetAbilityLogTimeSeconds(ActorInfo));
 		return false;
 	}
 
 	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags))
 	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityID=%s Owner=%s Reason=Super Time=%.3f RelevantTags=%s"),
+			*GetNameSafe(this),
+			*AbilityID.ToString(),
+			*GetAbilityOwnerName(ActorInfo),
+			GetAbilityLogTimeSeconds(ActorInfo),
+			OptionalRelevantTags ? *OptionalRelevantTags->ToString() : TEXT("None"));
 		return false;
 	}
 
@@ -76,6 +118,22 @@ bool UActGameplayAbility::CanActivateAbility(const FGameplayAbilitySpecHandle Ha
 		{
 			OptionalRelevantTags->AddTag(ActGameplayTags::Ability_ActivateFail_ActivationGroup);
 		}
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityID=%s Owner=%s Reason=ActivationGroupBlocked Group=%d Time=%.3f"),
+			*GetNameSafe(this),
+			*AbilityID.ToString(),
+			*GetAbilityOwnerName(ActorInfo),
+			static_cast<int32>(ActivationGroup),
+			GetAbilityLogTimeSeconds(ActorInfo));
+		return false;
+	}
+
+	if (!ActASC->CanActivateAbilityForChain(*this, OptionalRelevantTags))
+	{
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityID=%s Owner=%s Reason=AbilityChain Time=%.3f"),
+			*GetNameSafe(this),
+			*AbilityID.ToString(),
+			*GetAbilityOwnerName(ActorInfo),
+			GetAbilityLogTimeSeconds(ActorInfo));
 		return false;
 	}
 
@@ -187,6 +245,64 @@ bool UActGameplayAbility::DoesAbilitySatisfyTagRequirements(const UAbilitySystem
 	}
 
 	return true;
+}
+
+void UActGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+{
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] Activate. Ability=%s AbilityID=%s Owner=%s Policy=%d NetPolicy=%d Local=%d Auth=%d PredKey=%d Time=%.3f Trigger=%s"),
+		*GetNameSafe(this),
+		*AbilityID.ToString(),
+		*GetAbilityOwnerName(ActorInfo),
+		static_cast<int32>(ActivationPolicy),
+		static_cast<int32>(NetExecutionPolicy),
+		ActorInfo ? ActorInfo->IsLocallyControlled() : 0,
+		ActorInfo ? ActorInfo->IsNetAuthority() : 0,
+		ActivationInfo.GetActivationPredictionKey().Current,
+		GetAbilityLogTimeSeconds(ActorInfo),
+		TriggerEventData ? *TriggerEventData->EventTag.ToString() : TEXT("None"));
+
+	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+
+	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
+	{
+		ActASC->BeginAbilityChain(*this, Handle);
+	}
+}
+
+void UActGameplayAbility::CancelAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateCancelAbility)
+{
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] Cancel. Ability=%s AbilityID=%s Owner=%s Local=%d Auth=%d PredKey=%d Replicate=%d Time=%.3f"),
+		*GetNameSafe(this),
+		*AbilityID.ToString(),
+		*GetAbilityOwnerName(ActorInfo),
+		ActorInfo ? ActorInfo->IsLocallyControlled() : 0,
+		ActorInfo ? ActorInfo->IsNetAuthority() : 0,
+		ActivationInfo.GetActivationPredictionKey().Current,
+		bReplicateCancelAbility,
+		GetAbilityLogTimeSeconds(ActorInfo));
+
+	Super::CancelAbility(Handle, ActorInfo, ActivationInfo, bReplicateCancelAbility);
+}
+
+void UActGameplayAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+{
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] End. Ability=%s AbilityID=%s Owner=%s Local=%d Auth=%d PredKey=%d Replicate=%d Cancelled=%d Time=%.3f"),
+		*GetNameSafe(this),
+		*AbilityID.ToString(),
+		*GetAbilityOwnerName(ActorInfo),
+		ActorInfo ? ActorInfo->IsLocallyControlled() : 0,
+		ActorInfo ? ActorInfo->IsNetAuthority() : 0,
+		ActivationInfo.GetActivationPredictionKey().Current,
+		bReplicateEndAbility,
+		bWasCancelled,
+		GetAbilityLogTimeSeconds(ActorInfo));
+
+	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
+	{
+		ActASC->EndAbilityChain(*this, Handle);
+	}
+
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
 void UActGameplayAbility::OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
