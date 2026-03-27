@@ -6,173 +6,209 @@
 
 #include "AbilitySystem/AbilityChain/ActAbilityChainTypes.h"
 
-class UActAbilityChainData;
 class UActAbilitySystemComponent;
 class UActGameplayAbility;
-struct FActAbilityChainNode;
-struct FActAbilityChainTransition;
 
 enum class EActAbilityChainCommandResolution : uint8
 {
 	NotHandled,
-	SectionJump,
 	AbilityActivated
 };
 
 /**
- * Resolution result returned to the input layer after evaluating a command inside an active chain.
+ * Resolution result returned to the input layer after evaluating one command.
  *
- * The input system should treat this as an opaque decision:
- * - It may consume the command from buffer (bConsumeInput).
- * - It may need to relay a predicted transition to server (ToReplicatedTransition()).
+ * The input layer only needs to know whether the command produced a successful activation
+ * and whether the command buffer should be consumed afterwards.
  */
 struct FActAbilityChainCommandResolveResult
 {
+	/** Final runtime outcome for the command. */
 	EActAbilityChainCommandResolution Resolution = EActAbilityChainCommandResolution::NotHandled;
-	FName SourceAbilityID = NAME_None;
-	FName SourceNodeId = NAME_None;
-	FName TargetAbilityID = NAME_None;
-	FName TargetNodeId = NAME_None;
+
+	/** Source active ability that owned the winning combo windows. */
+	FName SourceAbilityId = NAME_None;
+
+	/** Follow-up ability activated by the command. */
+	FName TargetAbilityId = NAME_None;
+
+	/** True when the command should be removed from the analyzer buffer after handling. */
 	bool bConsumeInput = true;
-	bool bCancelCurrentAbility = false;
 
 	/** True if this command resulted in an actionable chain decision. */
 	bool WasHandled() const
 	{
 		return Resolution != EActAbilityChainCommandResolution::NotHandled;
 	}
-
-	/** Converts to a lightweight replicated transition payload (used for client -> server relay). */
-	FActAbilityChainReplicatedTransition ToReplicatedTransition() const
-	{
-		FActAbilityChainReplicatedTransition Transition;
-		Transition.SourceAbilityID = SourceAbilityID;
-		Transition.SourceNodeId = SourceNodeId;
-		Transition.TargetAbilityID = TargetAbilityID;
-		Transition.TargetNodeId = TargetNodeId;
-		Transition.bCancelCurrentAbility = bCancelCurrentAbility;
-		return Transition;
-	}
 };
 
 /**
- * Runtime combo/ability-chain state machine living inside UActAbilitySystemComponent.
+ * Runtime combo state machine living inside UActAbilitySystemComponent.
  *
- * Goals:
- * - Keep chain authority in ASC (not in animation notifies).
- * - Support LocalPredicted gameplay: client predicts node jumps/ability transitions, server confirms.
- * - Provide "window" semantics via AnimNotifyState signals, with optional grace seconds for weak network.
- *
- * Key concepts:
- * - Node: a logical step in a combo, typically 1:1 with a montage section.
- * - Window: a tag-authored time range during which certain transitions are allowed.
- * - Transition: a rule from current node to target node or target ability, gated by command + windows + tags.
+ * This runtime implements the upgraded first-generation design:
+ * - authoring lives entirely on AnimNotifyState combo windows
+ * - the ASC owns all authoritative runtime state
+ * - the client may predict a follow-up ability, but the server still validates the request
  */
 class ACTGAME_API FActAbilityChainRuntime
 {
 public:
 	FActAbilityChainRuntime() = default;
 
-	/** Clears active/recent state and pending authorization. */
+	/** Clears active state, registered windows, and any pending follow-up authorization. */
 	void Reset();
-	/** True if there is an active chain context (i.e. we are inside an ability with chain data). */
-	bool HasActiveChain() const;
 
-	/** Called when an ability that owns a chain begins; initializes ActiveContext. */
+	/** True if there is a currently active ability that still owns valid combo runtime state. */
+	bool HasActiveChain(const UActAbilitySystemComponent& ActASC) const;
+
+	/** Registers a new active combo source ability. */
 	void BeginAbility(UActAbilitySystemComponent& ActASC, UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
-	/** Called when that ability ends; snapshots RecentContext for grace and clears ActiveContext. */
+
+	/** Clears the active combo source if the specified ability was the current owner. */
 	void EndAbility(UActAbilitySystemComponent& ActASC, const UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
-	/** Advances current node when animation notifies report entering a new node/section. */
-	void EnterNode(UActAbilitySystemComponent& ActASC, FName NodeId);
-	/** Opens a window tag (source object is used to handle overlapping notifies). */
-	void OpenWindow(UActAbilitySystemComponent& ActASC, const FGameplayTag& WindowTag, const UObject* SourceObject);
-	/** Closes a window tag. */
-	void CloseWindow(UActAbilitySystemComponent& ActASC, const FGameplayTag& WindowTag, const UObject* SourceObject);
+
+	/** Opens or refreshes one authored combo window. */
+	void OpenWindow(UActAbilitySystemComponent& ActASC, const FActAbilityChainWindowDefinition& WindowDefinition);
+
+	/** Closes one authored combo window by its stable window Id. */
+	void CloseWindow(UActAbilitySystemComponent& ActASC, FName WindowId);
 
 	/**
-	 * Activation gate used by ASC to decide whether an ability may activate right now.
-	 * This is what prevents random abilities from being started during a chain unless authorized.
+	 * Activation gate used by ASC to decide whether an ability may activate while a combo source is active.
+	 *
+	 * During an active combo, only the currently authorized follow-up ability may start.
 	 */
 	bool CanActivateAbility(const UActAbilitySystemComponent& ActASC, const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const;
 
 	/**
-	 * Evaluate one command against the current node transitions.
-	 * If bAllowAbilityActivation is false, ability transitions will be ignored (used by certain input phases).
+	 * Evaluates one command against all currently active combo windows.
+	 *
+	 * The runtime follows the first-generation precedence rules:
+	 * - sort overlapping windows by WindowPriority descending
+	 * - inside each window, choose the highest-priority matching entry
+	 * - attempt activation; if it fails, continue to the next window
 	 */
-	FActAbilityChainCommandResolveResult ResolveCommand(UActAbilitySystemComponent& ActASC, const FGameplayTag& CommandTag, bool bAllowAbilityActivation);
+	FActAbilityChainCommandResolveResult ResolveCommand(UActAbilitySystemComponent& ActASC, const FGameplayTag& CommandTag);
 
 	/**
-	 * Applies a replicated transition (typically server -> client catch-up).
-	 * We reject stale transitions by validating SourceNodeId against current node.
+	 * Validates and authorizes one client-predicted follow-up request on the server.
+	 *
+	 * This does not activate the target ability by itself; it only opens the server-side gate
+	 * so the subsequent GAS activation request may pass CanActivateAbility.
 	 */
-	bool ApplyReplicatedTransition(UActAbilitySystemComponent& ActASC, const FActAbilityChainReplicatedTransition& Transition);
+	bool AuthorizePredictedActivation(UActAbilitySystemComponent& ActASC, const FActAbilityChainActivationRequest& Request);
 
-	/** Returns the start montage section name for a chain ability (used when StartSection is left empty). */
-	FName GetInitialSectionForAbility(const UActGameplayAbility& Ability) const;
+	/** Clears one pending follow-up authorization after an activation failure. */
+	void NotifyAbilityActivationFailed(FName AbilityId);
 
 private:
+	/** Mutable runtime state for one authored combo window. */
 	struct FWindowState
 	{
-		TSet<const UObject*> Sources;
-		double LastClosedTime = TNumericLimits<double>::Lowest();
-		FName LastNodeId = NAME_None;
+		/** Static authored contents copied from the notify when it opens. */
+		FActAbilityChainWindowDefinition Definition;
+
+		/** Number of active begin/end scopes currently holding the window open. */
+		int32 OpenCount = 0;
+
+		/** Monotonic sequence used for deterministic tie-breaking between same-priority windows. */
+		uint64 OpenSequence = 0;
+
+		/** Time when the window last fully closed. Used for weak-network server validation grace. */
+		double LastClosedTimeSeconds = TNumericLimits<double>::Lowest();
+
+		/** Returns true if the window is currently open. */
+		bool IsOpen() const { return OpenCount > 0; }
 	};
 
+	/** The active combo source ability currently owning all registered windows. */
 	struct FActiveChainContext
 	{
+		/** Instanced ability object currently driving combo notifies. */
 		TWeakObjectPtr<UActGameplayAbility> AbilityInstance;
-		TWeakObjectPtr<const UActAbilityChainData> ChainData;
-		FGameplayAbilitySpecHandle SpecHandle;
-		FName AbilityID;
-		FName CurrentNodeId;
-		TMap<FGameplayTag, FWindowState> WindowStates;
-		double LastNodeChangeTime = 0.0;
 
+		/** Spec handle of the source ability. */
+		FGameplayAbilitySpecHandle SpecHandle;
+
+		/** Stable authored Id of the source ability. */
+		FName AbilityId;
+
+		/** Clears the source ability context. */
 		void Reset();
+
+		/** True if the source ability context can drive combo windows. */
 		bool IsValid() const;
 	};
 
-	struct FRecentChainContext
+	/** Pending authorization for one follow-up ability predicted by the client and/or accepted by the server. */
+	struct FPendingActivationAuthorization
 	{
-		TWeakObjectPtr<const UActAbilityChainData> ChainData;
-		FName AbilityID;
-		FName CurrentNodeId;
-		TMap<FGameplayTag, FWindowState> LastClosedWindowStates;
-		double ExpiresAt = 0.0;
+		/** Source ability that produced the authorization. */
+		FName SourceAbilityId;
 
+		/** Follow-up ability currently allowed to activate. */
+		FName TargetAbilityId;
+
+		/** Spec handle of the source ability that should be canceled after follow-up activation succeeds. */
+		FGameplayAbilitySpecHandle SourceSpecHandle;
+
+		/** Expiration time for the authorization gate. */
+		double ExpiresAtSeconds = 0.0;
+
+		/** Clears the authorization gate. */
 		void Reset();
-		bool IsValid(double CurrentTimeSeconds) const;
-	};
 
-	struct FPendingAbilityAuthorization
-	{
-		FName SourceAbilityID;
-		FName SourceNodeId;
-		FName TargetAbilityID;
-		double ExpiresAt = 0.0;
-
-		void Reset();
-		bool Matches(FName InAbilityID, double CurrentTimeSeconds) const;
+		/** True if the specified ability is still authorized to activate. */
+		bool Matches(FName AbilityId, double CurrentTimeSeconds) const;
 	};
 
 private:
-	const UActAbilityChainData* ResolveChainData(const UActGameplayAbility& Ability) const;
+	/** Returns the current world time for grace / expiration calculations. */
 	double GetCurrentTimeSeconds(const UActAbilitySystemComponent& ActASC) const;
-	void SnapshotRecentContext(double CurrentTimeSeconds, float GraceSeconds);
-	void ClearOpenWindowsAsClosed(double CurrentTimeSeconds);
-	const FActAbilityChainNode* GetCurrentNode() const;
-	const FActAbilityChainNode* GetNode(const UActAbilityChainData* ChainData, FName NodeId) const;
-	bool SatisfiesOwnedTagRequirements(const UActAbilitySystemComponent& ActASC, const FActAbilityChainTransition& Transition) const;
-	bool SatisfiesWindowRequirements(const FActAbilityChainTransition& Transition, double CurrentTimeSeconds, float GraceSeconds) const;
-	bool IsWindowSatisfied(const FGameplayTag& WindowTag, double CurrentTimeSeconds, float GraceSeconds) const;
-	bool IsAbilityTransitionAllowedFromActiveContext(const UActAbilitySystemComponent& ActASC, FName TargetAbilityID, double CurrentTimeSeconds, float GraceSeconds) const;
-	bool IsAbilityTransitionAllowedFromRecentContext(const UActAbilitySystemComponent& ActASC, FName TargetAbilityID, double CurrentTimeSeconds) const;
-	const FActAbilityChainTransition* FindTransition(const UActAbilityChainData* ChainData, FName SourceNodeId, const FActAbilityChainReplicatedTransition& Transition) const;
-	void AuthorizeAbilityTransition(UActAbilitySystemComponent& ActASC, const FActAbilityChainReplicatedTransition& Transition, double CurrentTimeSeconds, float GraceSeconds);
-	bool JumpToNode(UActAbilitySystemComponent& ActASC, const FActAbilityChainNode& TargetNode);
+
+	/** True if the cached combo source spec still exists and remains active on the ASC. */
+	bool HasUsableActiveContext(const UActAbilitySystemComponent& ActASC) const;
+
+	/** Resets the combo runtime if the cached combo source spec is no longer valid. */
+	bool ResetIfActiveContextInvalid(UActAbilitySystemComponent& ActASC);
+
+	/** Clears all registered window state without touching the active source ability. */
+	void ResetWindowStates();
+
+	/** True if the specified runtime window may still satisfy server validation. */
+	bool IsWindowAvailableForValidation(const FWindowState& WindowState, double CurrentTimeSeconds) const;
+
+	/** Builds a deterministic list of candidate windows for the given command. */
+	void GatherCandidateWindows(const FGameplayTag& CommandTag, double CurrentTimeSeconds, bool bAllowValidationGrace, TArray<const FWindowState*>& OutWindows) const;
+
+	/** Returns the highest-priority matching entry inside one specific window. */
+	const FActAbilityChainEntry* FindBestMatchingEntryInWindow(const FWindowState& WindowState, const FGameplayTag& CommandTag) const;
+
+	/** True if the active runtime currently permits the specified command -> ability pair. */
+	bool IsAuthorizedRequest(const FActAbilityChainActivationRequest& Request, double CurrentTimeSeconds) const;
+
+	/** Opens the local activation gate and remembers which source ability should be canceled after success. */
+	void GrantPendingActivation(const FActAbilityChainActivationRequest& Request, double CurrentTimeSeconds);
+
+	/** Clears one authorization gate only if it targets the specified ability Id. */
+	void ClearPendingActivationIfMatches(FName AbilityId);
+
+	/** Cancels the old source ability after the follow-up ability has started successfully. */
+	void CancelPreviousSourceAbilityIfNeeded(UActAbilitySystemComponent& ActASC, FGameplayAbilitySpecHandle NewSpecHandle, FName NewAbilityId);
+
+	/** Attempts to activate one follow-up ability from the currently active combo source. */
+	bool TryActivateChainEntry(UActAbilitySystemComponent& ActASC, const FGameplayTag& CommandTag, const FActAbilityChainEntry& Entry);
 
 private:
+	/** Current combo source ability. */
 	FActiveChainContext ActiveContext;
-	FRecentChainContext RecentContext;
-	FPendingAbilityAuthorization PendingAbilityAuthorization;
+
+	/** Runtime state for each currently known combo window, keyed by stable WindowId. */
+	TMap<FName, FWindowState> WindowStates;
+
+	/** Pending client/server authorization for one follow-up ability activation. */
+	FPendingActivationAuthorization PendingActivation;
+
+	/** Monotonic open sequence used to break same-priority window ties deterministically. */
+	uint64 NextWindowOpenSequence = 0;
 };

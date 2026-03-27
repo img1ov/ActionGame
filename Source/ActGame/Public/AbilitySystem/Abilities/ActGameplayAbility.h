@@ -3,13 +3,11 @@
 #pragma once
 
 #include "Abilities/GameplayAbility.h"
-#include "AbilitySystem/AbilityChain/ActAbilityChainTypes.h"
 #include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 
 #include "ActGameplayAbility.generated.h"
 
 class AActCharacter;
-class UActAbilityChainData;
 class UActAbilitySystemComponent;
 
 /**
@@ -74,12 +72,9 @@ public:
 
 	void TryActivateAbilityOnSpawn(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) const;
 
-	/** Authoring identifier used by runtime chain resolution and ID-based activation. */
-	FName GetAbilityID() const { return AbilityID; }
+	/** Stable authored identifier used by combo runtime resolution and Id-based activation. */
+	FName GetAbilityId() const { return AbilityId; }
 
-	UActAbilityChainData* GetAbilityChainData() const { return AbilityChainData; }
-	EActAbilityChainActivationMode GetAbilityChainActivationMode() const { return AbilityChainActivationMode; }
-	FName GetInitialAbilityChainSection() const;
 	const FActMontageRootMotionSourceSettings& GetMontageRootMotionSourceSettings() const { return MontageRootMotionSourceSettings; }
 	
 protected:
@@ -100,15 +95,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Activation")
 	EActAbilityActivationGroup ActivationGroup;
 
-	// Stable authoring ID for runtime lookup/activation (set per ability asset).
+	/** Stable authoring Id for runtime lookup and combo follow-up activation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability")
-	FName AbilityID;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Chain")
-	TObjectPtr<UActAbilityChainData> AbilityChainData;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Chain")
-	EActAbilityChainActivationMode AbilityChainActivationMode = EActAbilityChainActivationMode::Ignore;
+	FName AbilityId;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Motion")
 	FActMontageRootMotionSourceSettings MontageRootMotionSourceSettings;

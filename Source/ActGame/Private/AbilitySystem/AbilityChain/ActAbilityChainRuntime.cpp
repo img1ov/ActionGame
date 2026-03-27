@@ -3,100 +3,75 @@
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
-#include "AbilitySystem/AbilityChain/ActAbilityChainData.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
 
 namespace
 {
-double GetChainLogTimeSeconds(const UActAbilitySystemComponent& ActASC)
-{
-	const UWorld* World = ActASC.GetWorld();
-	return World ? World->GetTimeSeconds() : 0.0;
-}
+	/** Server-side validation grace after a combo window closes. */
+	constexpr double AbilityChainValidationGraceSeconds = 0.20;
+
+	/** Short-lived activation gate for one predicted follow-up ability. */
+	constexpr double AbilityChainAuthorizationLifetimeSeconds = 0.35;
 }
 
 void FActAbilityChainRuntime::FActiveChainContext::Reset()
 {
 	AbilityInstance.Reset();
-	ChainData.Reset();
 	SpecHandle = FGameplayAbilitySpecHandle();
-	AbilityID = NAME_None;
-	CurrentNodeId = NAME_None;
-	WindowStates.Reset();
-	LastNodeChangeTime = 0.0;
+	AbilityId = NAME_None;
 }
 
 bool FActAbilityChainRuntime::FActiveChainContext::IsValid() const
 {
-	return AbilityInstance.IsValid() && ChainData.IsValid() && !AbilityID.IsNone();
+	return AbilityInstance.IsValid() && SpecHandle.IsValid() && !AbilityId.IsNone();
 }
 
-void FActAbilityChainRuntime::FRecentChainContext::Reset()
+void FActAbilityChainRuntime::FPendingActivationAuthorization::Reset()
 {
-	ChainData.Reset();
-	AbilityID = NAME_None;
-	CurrentNodeId = NAME_None;
-	LastClosedWindowStates.Reset();
-	ExpiresAt = 0.0;
+	SourceAbilityId = NAME_None;
+	TargetAbilityId = NAME_None;
+	SourceSpecHandle = FGameplayAbilitySpecHandle();
+	ExpiresAtSeconds = 0.0;
 }
 
-bool FActAbilityChainRuntime::FRecentChainContext::IsValid(const double CurrentTimeSeconds) const
+bool FActAbilityChainRuntime::FPendingActivationAuthorization::Matches(const FName AbilityId, const double CurrentTimeSeconds) const
 {
-	return ChainData.IsValid() && !AbilityID.IsNone() && CurrentTimeSeconds <= ExpiresAt;
-}
-
-void FActAbilityChainRuntime::FPendingAbilityAuthorization::Reset()
-{
-	SourceAbilityID = NAME_None;
-	SourceNodeId = NAME_None;
-	TargetAbilityID = NAME_None;
-	ExpiresAt = 0.0;
-}
-
-bool FActAbilityChainRuntime::FPendingAbilityAuthorization::Matches(const FName InAbilityID, const double CurrentTimeSeconds) const
-{
-	return !TargetAbilityID.IsNone() && TargetAbilityID == InAbilityID && CurrentTimeSeconds <= ExpiresAt;
+	return !TargetAbilityId.IsNone() && TargetAbilityId == AbilityId && CurrentTimeSeconds <= ExpiresAtSeconds;
 }
 
 void FActAbilityChainRuntime::Reset()
 {
 	ActiveContext.Reset();
-	RecentContext.Reset();
-	PendingAbilityAuthorization.Reset();
+	PendingActivation.Reset();
+	ResetWindowStates();
+	NextWindowOpenSequence = 0;
 }
 
-bool FActAbilityChainRuntime::HasActiveChain() const
+bool FActAbilityChainRuntime::HasActiveChain(const UActAbilitySystemComponent& ActASC) const
 {
-	return ActiveContext.IsValid();
+	return HasUsableActiveContext(ActASC);
 }
 
 void FActAbilityChainRuntime::BeginAbility(UActAbilitySystemComponent& ActASC, UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
 {
-	const UActAbilityChainData* ChainData = ResolveChainData(Ability);
-	if (!ChainData)
+	const FName AbilityId = Ability.GetAbilityId();
+	if (AbilityId.IsNone() || !SpecHandle.IsValid())
 	{
 		return;
 	}
 
-	RecentContext.Reset();
+	// Once the follow-up ability has really started, the previous attack can be retired safely.
+	CancelPreviousSourceAbilityIfNeeded(ActASC, SpecHandle, AbilityId);
+
 	ActiveContext.Reset();
 	ActiveContext.AbilityInstance = &Ability;
-	ActiveContext.ChainData = ChainData;
 	ActiveContext.SpecHandle = SpecHandle;
-	ActiveContext.AbilityID = Ability.GetAbilityID();
-	ActiveContext.CurrentNodeId = ChainData->GetStartNode() ? ChainData->GetStartNode()->NodeId : NAME_None;
-	ActiveContext.LastNodeChangeTime = GetCurrentTimeSeconds(ActASC);
-	if (PendingAbilityAuthorization.TargetAbilityID == ActiveContext.AbilityID)
-	{
-		PendingAbilityAuthorization.Reset();
-	}
+	ActiveContext.AbilityId = AbilityId;
+	ResetWindowStates();
 
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Begin. Owner=%s AbilityID=%s Node=%s Time=%.3f"),
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Begin. Owner=%s AbilityId=%s Time=%.3f"),
 		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*ActiveContext.CurrentNodeId.ToString(),
-		GetChainLogTimeSeconds(ActASC));
+		*AbilityId.ToString(),
+		GetCurrentTimeSeconds(ActASC));
 }
 
 void FActAbilityChainRuntime::EndAbility(UActAbilitySystemComponent& ActASC, const UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
@@ -106,345 +81,164 @@ void FActAbilityChainRuntime::EndAbility(UActAbilitySystemComponent& ActASC, con
 		return;
 	}
 
-	const bool bMatchesAbility = ActiveContext.AbilityInstance.Get() == &Ability || ActiveContext.AbilityID == Ability.GetAbilityID();
+	const bool bMatchesAbility = ActiveContext.AbilityInstance.Get() == &Ability || ActiveContext.AbilityId == Ability.GetAbilityId();
 	const bool bMatchesSpecHandle = !SpecHandle.IsValid() || ActiveContext.SpecHandle == SpecHandle;
 	if (!bMatchesAbility || !bMatchesSpecHandle)
 	{
 		return;
 	}
 
-	const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	const float GraceSeconds = ChainData ? ChainData->PredictionGraceSeconds : 0.0f;
-	SnapshotRecentContext(CurrentTimeSeconds, GraceSeconds);
-
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] End. Owner=%s AbilityID=%s Node=%s Grace=%.3f Time=%.3f"),
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] End. Owner=%s AbilityId=%s Time=%.3f"),
 		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*ActiveContext.CurrentNodeId.ToString(),
-		GraceSeconds,
-		CurrentTimeSeconds);
+		*ActiveContext.AbilityId.ToString(),
+		GetCurrentTimeSeconds(ActASC));
 
 	ActiveContext.Reset();
+	ResetWindowStates();
 }
 
-void FActAbilityChainRuntime::EnterNode(UActAbilitySystemComponent& ActASC, const FName NodeId)
+void FActAbilityChainRuntime::OpenWindow(UActAbilitySystemComponent& ActASC, const FActAbilityChainWindowDefinition& WindowDefinition)
 {
-	if (!ActiveContext.IsValid() || NodeId.IsNone())
+	if (ResetIfActiveContextInvalid(ActASC) || !ActiveContext.IsValid() || !WindowDefinition.IsValid())
 	{
 		return;
 	}
 
-	const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-	if (!GetNode(ChainData, NodeId))
-	{
-		return;
-	}
+	FWindowState& WindowState = WindowStates.FindOrAdd(WindowDefinition.WindowId);
+	WindowState.Definition = WindowDefinition;
+	WindowState.OpenCount = FMath::Max(0, WindowState.OpenCount) + 1;
+	WindowState.OpenSequence = ++NextWindowOpenSequence;
 
-	if (ActiveContext.CurrentNodeId == NodeId)
-	{
-		return;
-	}
-
-	ClearOpenWindowsAsClosed(GetCurrentTimeSeconds(ActASC));
-	ActiveContext.CurrentNodeId = NodeId;
-	ActiveContext.LastNodeChangeTime = GetCurrentTimeSeconds(ActASC);
-
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] EnterNode. Owner=%s AbilityID=%s Node=%s Time=%.3f"),
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] WindowOpen. Owner=%s AbilityId=%s WindowId=%s Priority=%d Count=%d Time=%.3f"),
 		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*NodeId.ToString(),
-		GetChainLogTimeSeconds(ActASC));
+		*ActiveContext.AbilityId.ToString(),
+		*WindowDefinition.WindowId.ToString(),
+		WindowDefinition.WindowPriority,
+		WindowState.OpenCount,
+		GetCurrentTimeSeconds(ActASC));
 }
 
-void FActAbilityChainRuntime::OpenWindow(UActAbilitySystemComponent& ActASC, const FGameplayTag& WindowTag, const UObject* SourceObject)
+void FActAbilityChainRuntime::CloseWindow(UActAbilitySystemComponent& ActASC, const FName WindowId)
 {
-	if (!ActiveContext.IsValid() || !WindowTag.IsValid() || !SourceObject)
+	if (ResetIfActiveContextInvalid(ActASC) || !ActiveContext.IsValid() || WindowId.IsNone())
 	{
 		return;
 	}
 
-	FWindowState& WindowState = ActiveContext.WindowStates.FindOrAdd(WindowTag);
-	if (WindowState.Sources.Contains(SourceObject))
+	FWindowState* WindowState = WindowStates.Find(WindowId);
+	if (!WindowState)
 	{
 		return;
 	}
 
-	// We track per-window "sources" so overlapping notify states do not fight each other.
-	// A window is considered open as long as at least one source remains.
-	WindowState.Sources.Add(SourceObject);
-	WindowState.LastNodeId = ActiveContext.CurrentNodeId;
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] WindowOpen. Owner=%s AbilityID=%s Node=%s Window=%s Count=%d Time=%.3f"),
+	WindowState->OpenCount = FMath::Max(0, WindowState->OpenCount - 1);
+	if (!WindowState->IsOpen())
+	{
+		// Closed windows stay warm for a short time so the server can still validate
+		// late-arriving predicted follow-up requests under weak network conditions.
+		WindowState->LastClosedTimeSeconds = GetCurrentTimeSeconds(ActASC);
+	}
+
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] WindowClose. Owner=%s AbilityId=%s WindowId=%s Count=%d Time=%.3f"),
 		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*ActiveContext.CurrentNodeId.ToString(),
-		*WindowTag.ToString(),
-		WindowState.Sources.Num(),
-		GetChainLogTimeSeconds(ActASC));
-}
-
-void FActAbilityChainRuntime::CloseWindow(UActAbilitySystemComponent& ActASC, const FGameplayTag& WindowTag, const UObject* SourceObject)
-{
-	if (!ActiveContext.IsValid() || !WindowTag.IsValid() || !SourceObject)
-	{
-		return;
-	}
-
-	FWindowState* WindowState = ActiveContext.WindowStates.Find(WindowTag);
-	if (!WindowState || !WindowState->Sources.Contains(SourceObject))
-	{
-		return;
-	}
-
-	WindowState->Sources.Remove(SourceObject);
-	if (WindowState->Sources.IsEmpty())
-	{
-		// We keep the close time so grace seconds can still satisfy this window under weak network,
-		// even if input/transition arrives slightly after the animation notify ended.
-		WindowState->LastClosedTime = GetCurrentTimeSeconds(ActASC);
-		WindowState->LastNodeId = ActiveContext.CurrentNodeId;
-	}
-
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] WindowClose. Owner=%s AbilityID=%s Node=%s Window=%s Count=%d Time=%.3f"),
-		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*ActiveContext.CurrentNodeId.ToString(),
-		*WindowTag.ToString(),
-		WindowState->Sources.Num(),
-		GetChainLogTimeSeconds(ActASC));
+		*ActiveContext.AbilityId.ToString(),
+		*WindowId.ToString(),
+		WindowState->OpenCount,
+		GetCurrentTimeSeconds(ActASC));
 }
 
 bool FActAbilityChainRuntime::CanActivateAbility(const UActAbilitySystemComponent& ActASC, const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const
 {
-	const EActAbilityChainActivationMode ActivationMode = Ability.GetAbilityChainActivationMode();
-	if (ActivationMode == EActAbilityChainActivationMode::Ignore)
+	const FName AbilityId = Ability.GetAbilityId();
+	if (AbilityId.IsNone())
 	{
 		return true;
-	}
-
-	const FName AbilityID = Ability.GetAbilityID();
-	if (AbilityID.IsNone())
-	{
-		return ActivationMode != EActAbilityChainActivationMode::ChainOnly;
 	}
 
 	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	if (ActiveContext.IsValid())
-	{
-		if (ActivationMode == EActAbilityChainActivationMode::StarterOnly)
-		{
-			return false;
-		}
-
-		if (PendingAbilityAuthorization.Matches(AbilityID, CurrentTimeSeconds))
-		{
-			return true;
-		}
-
-		const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-		const float GraceSeconds = ChainData ? ChainData->PredictionGraceSeconds : 0.0f;
-		if (IsAbilityTransitionAllowedFromActiveContext(ActASC, AbilityID, CurrentTimeSeconds, GraceSeconds))
-		{
-			return true;
-		}
-
-		if (OptionalRelevantTags)
-		{
-			OptionalRelevantTags->AddTag(FGameplayTag::RequestGameplayTag(TEXT("Ability.ActivateFail.Chain"), false));
-		}
-		return false;
-	}
-
-	if (ActivationMode != EActAbilityChainActivationMode::StarterOnly &&
-		PendingAbilityAuthorization.Matches(AbilityID, CurrentTimeSeconds))
+	if (PendingActivation.Matches(AbilityId, CurrentTimeSeconds))
 	{
 		return true;
 	}
 
-	if ((ActivationMode == EActAbilityChainActivationMode::ChainOnly || ActivationMode == EActAbilityChainActivationMode::StarterOrChain) &&
-		IsAbilityTransitionAllowedFromRecentContext(ActASC, AbilityID, CurrentTimeSeconds))
+	if (!HasUsableActiveContext(ActASC))
 	{
 		return true;
 	}
 
-	return ActivationMode == EActAbilityChainActivationMode::StarterOnly || ActivationMode == EActAbilityChainActivationMode::StarterOrChain;
+	if (OptionalRelevantTags)
+	{
+		OptionalRelevantTags->AddTag(FGameplayTag::RequestGameplayTag(TEXT("Ability.ActivateFail.Chain"), false));
+	}
+
+	return false;
 }
 
-FActAbilityChainCommandResolveResult FActAbilityChainRuntime::ResolveCommand(UActAbilitySystemComponent& ActASC, const FGameplayTag& CommandTag, const bool bAllowAbilityActivation)
+FActAbilityChainCommandResolveResult FActAbilityChainRuntime::ResolveCommand(UActAbilitySystemComponent& ActASC, const FGameplayTag& CommandTag)
 {
 	FActAbilityChainCommandResolveResult Result;
-	if (!ActiveContext.IsValid() || !CommandTag.IsValid())
+	if (ResetIfActiveContextInvalid(ActASC) || !ActiveContext.IsValid() || !CommandTag.IsValid())
 	{
 		return Result;
 	}
 
-	const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-	const FActAbilityChainNode* CurrentNode = GetCurrentNode();
-	if (!ChainData || !CurrentNode)
+	TArray<const FWindowState*> CandidateWindows;
+	GatherCandidateWindows(CommandTag, GetCurrentTimeSeconds(ActASC), false, CandidateWindows);
+
+	for (const FWindowState* WindowState : CandidateWindows)
 	{
+		if (!WindowState)
+		{
+			continue;
+		}
+
+		const FActAbilityChainEntry* Entry = FindBestMatchingEntryInWindow(*WindowState, CommandTag);
+		if (!Entry)
+		{
+			continue;
+		}
+
+		if (!TryActivateChainEntry(ActASC, CommandTag, *Entry))
+		{
+			continue;
+		}
+
+		Result.Resolution = EActAbilityChainCommandResolution::AbilityActivated;
+		Result.SourceAbilityId = ActiveContext.AbilityId;
+		Result.TargetAbilityId = Entry->TargetAbilityId;
+		Result.bConsumeInput = true;
 		return Result;
-	}
-
-	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	const float GraceSeconds = ChainData->PredictionGraceSeconds;
-
-	TArray<const FActAbilityChainTransition*> Candidates;
-	Candidates.Reserve(CurrentNode->Transitions.Num());
-	for (const FActAbilityChainTransition& Transition : CurrentNode->Transitions)
-	{
-		if (!Transition.CommandTag.IsValid() || Transition.CommandTag != CommandTag)
-		{
-			continue;
-		}
-
-		if (!SatisfiesOwnedTagRequirements(ActASC, Transition))
-		{
-			continue;
-		}
-
-		if (!SatisfiesWindowRequirements(Transition, CurrentTimeSeconds, GraceSeconds))
-		{
-			continue;
-		}
-
-		Candidates.Add(&Transition);
-	}
-
-	Candidates.Sort([](const FActAbilityChainTransition& A, const FActAbilityChainTransition& B)
-	{
-		return A.Priority > B.Priority;
-	});
-
-	for (const FActAbilityChainTransition* Transition : Candidates)
-	{
-		if (!Transition)
-		{
-			continue;
-		}
-
-		if (Transition->TransitionType == EActAbilityChainTransitionType::Ability &&
-			!Transition->TargetAbilityID.IsNone() &&
-			Transition->TargetAbilityID != ActiveContext.AbilityID)
-		{
-			if (!bAllowAbilityActivation)
-			{
-				continue;
-			}
-
-			if (Transition->bCancelCurrentAbility)
-			{
-				FActAbilityChainReplicatedTransition PredictedTransition;
-				PredictedTransition.SourceAbilityID = ActiveContext.AbilityID;
-				PredictedTransition.SourceNodeId = CurrentNode->NodeId;
-				PredictedTransition.TargetAbilityID = Transition->TargetAbilityID;
-				PredictedTransition.bCancelCurrentAbility = true;
-				AuthorizeAbilityTransition(ActASC, PredictedTransition, CurrentTimeSeconds, GraceSeconds);
-			}
-
-			if (ActASC.TryActivateAbilityByID(Transition->TargetAbilityID, true, false, nullptr))
-			{
-				Result.Resolution = EActAbilityChainCommandResolution::AbilityActivated;
-				Result.SourceAbilityID = ActiveContext.AbilityID;
-				Result.SourceNodeId = CurrentNode->NodeId;
-				Result.TargetAbilityID = Transition->TargetAbilityID;
-				Result.bConsumeInput = Transition->bConsumeInput;
-				Result.bCancelCurrentAbility = Transition->bCancelCurrentAbility;
-				return Result;
-			}
-
-			if (Transition->bCancelCurrentAbility)
-			{
-				PendingAbilityAuthorization.Reset();
-			}
-
-			continue;
-		}
-
-		const FActAbilityChainNode* TargetNode = GetNode(ChainData, Transition->TargetNodeId);
-		if (!TargetNode)
-		{
-			continue;
-		}
-
-		if (JumpToNode(ActASC, *TargetNode))
-		{
-			Result.Resolution = EActAbilityChainCommandResolution::SectionJump;
-			Result.SourceAbilityID = ActiveContext.AbilityID;
-			Result.SourceNodeId = CurrentNode->NodeId;
-			Result.TargetNodeId = TargetNode->NodeId;
-			Result.bConsumeInput = Transition->bConsumeInput;
-			return Result;
-		}
 	}
 
 	return Result;
 }
 
-bool FActAbilityChainRuntime::ApplyReplicatedTransition(UActAbilitySystemComponent& ActASC, const FActAbilityChainReplicatedTransition& Transition)
+bool FActAbilityChainRuntime::AuthorizePredictedActivation(UActAbilitySystemComponent& ActASC, const FActAbilityChainActivationRequest& Request)
 {
-	if (!Transition.IsValid() || !ActiveContext.IsValid())
-	{
-		return false;
-	}
-
-	if (!Transition.SourceAbilityID.IsNone() && Transition.SourceAbilityID != ActiveContext.AbilityID)
-	{
-		return false;
-	}
-
-	if (!Transition.SourceNodeId.IsNone() && Transition.SourceNodeId != ActiveContext.CurrentNodeId)
-	{
-		// Stale packet guard: under bad network, predicted transitions can arrive late/out of order.
-		// If server/client are no longer on the source node, applying it would "yo-yo" the combo.
-		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Ignore replicated transition. Owner=%s Reason=SourceNodeMismatch CurrentNode=%s SourceNode=%s Time=%.3f"),
-			*GetNameSafe(ActASC.GetAvatarActor()),
-			*ActiveContext.CurrentNodeId.ToString(),
-			*Transition.SourceNodeId.ToString(),
-			GetChainLogTimeSeconds(ActASC));
-		return false;
-	}
-
-	const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-	if (!ChainData)
-	{
-		return false;
-	}
-
-	const FActAbilityChainTransition* TransitionDefinition = FindTransition(ChainData, Transition.SourceNodeId, Transition);
-	if (!TransitionDefinition || !SatisfiesOwnedTagRequirements(ActASC, *TransitionDefinition))
+	if (!Request.IsValid() || ResetIfActiveContextInvalid(ActASC) || !ActiveContext.IsValid())
 	{
 		return false;
 	}
 
 	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	const float GraceSeconds = ChainData->PredictionGraceSeconds;
-	if (Transition.IsSectionTransition())
+	if (!IsAuthorizedRequest(Request, CurrentTimeSeconds))
 	{
-		if (Transition.TargetNodeId == ActiveContext.CurrentNodeId)
-		{
-			return false;
-		}
-
-		if (const FActAbilityChainNode* TargetNode = GetNode(ChainData, Transition.TargetNodeId))
-		{
-			return JumpToNode(ActASC, *TargetNode);
-		}
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Authorize rejected. Owner=%s SourceAbilityId=%s Command=%s TargetAbilityId=%s Time=%.3f"),
+			*GetNameSafe(ActASC.GetAvatarActor()),
+			*Request.SourceAbilityId.ToString(),
+			*Request.CommandTag.ToString(),
+			*Request.TargetAbilityId.ToString(),
+			CurrentTimeSeconds);
 		return false;
 	}
 
-	AuthorizeAbilityTransition(ActASC, Transition, CurrentTimeSeconds, GraceSeconds);
+	GrantPendingActivation(Request, CurrentTimeSeconds);
 	return true;
 }
 
-FName FActAbilityChainRuntime::GetInitialSectionForAbility(const UActGameplayAbility& Ability) const
+void FActAbilityChainRuntime::NotifyAbilityActivationFailed(const FName AbilityId)
 {
-	const UActAbilityChainData* ChainData = ResolveChainData(Ability);
-	return ChainData ? ChainData->GetStartSectionName() : NAME_None;
-}
-
-const UActAbilityChainData* FActAbilityChainRuntime::ResolveChainData(const UActGameplayAbility& Ability) const
-{
-	return Ability.GetAbilityChainData();
+	ClearPendingActivationIfMatches(AbilityId);
 }
 
 double FActAbilityChainRuntime::GetCurrentTimeSeconds(const UActAbilitySystemComponent& ActASC) const
@@ -453,340 +247,200 @@ double FActAbilityChainRuntime::GetCurrentTimeSeconds(const UActAbilitySystemCom
 	return World ? World->GetTimeSeconds() : 0.0;
 }
 
-void FActAbilityChainRuntime::SnapshotRecentContext(const double CurrentTimeSeconds, const float GraceSeconds)
+bool FActAbilityChainRuntime::HasUsableActiveContext(const UActAbilitySystemComponent& ActASC) const
 {
-	if (!ActiveContext.IsValid() || GraceSeconds <= 0.0f)
+	if (!ActiveContext.IsValid())
 	{
-		RecentContext.Reset();
+		return false;
+	}
+
+	const FGameplayAbilitySpec* ActiveSpec = ActASC.FindAbilitySpecFromHandle(ActiveContext.SpecHandle);
+	return ActiveSpec && ActiveSpec->IsActive();
+}
+
+bool FActAbilityChainRuntime::ResetIfActiveContextInvalid(UActAbilitySystemComponent& ActASC)
+{
+	if (!ActiveContext.IsValid() || HasUsableActiveContext(ActASC))
+	{
+		return false;
+	}
+
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Reset stale active context. Owner=%s AbilityId=%s Time=%.3f"),
+		*GetNameSafe(ActASC.GetAvatarActor()),
+		*ActiveContext.AbilityId.ToString(),
+		GetCurrentTimeSeconds(ActASC));
+
+	Reset();
+	return true;
+}
+
+void FActAbilityChainRuntime::ResetWindowStates()
+{
+	WindowStates.Reset();
+}
+
+bool FActAbilityChainRuntime::IsWindowAvailableForValidation(const FWindowState& WindowState, const double CurrentTimeSeconds) const
+{
+	return WindowState.IsOpen() || (CurrentTimeSeconds - WindowState.LastClosedTimeSeconds) <= AbilityChainValidationGraceSeconds;
+}
+
+void FActAbilityChainRuntime::GatherCandidateWindows(
+	const FGameplayTag& CommandTag,
+	const double CurrentTimeSeconds,
+	const bool bAllowValidationGrace,
+	TArray<const FWindowState*>& OutWindows) const
+{
+	OutWindows.Reset();
+
+	for (const TPair<FName, FWindowState>& Pair : WindowStates)
+	{
+		const FWindowState& WindowState = Pair.Value;
+		const bool bWindowAvailable = bAllowValidationGrace
+			? IsWindowAvailableForValidation(WindowState, CurrentTimeSeconds)
+			: WindowState.IsOpen();
+		if (!bWindowAvailable)
+		{
+			continue;
+		}
+
+		if (!FindBestMatchingEntryInWindow(WindowState, CommandTag))
+		{
+			continue;
+		}
+
+		OutWindows.Add(&WindowState);
+	}
+
+	OutWindows.Sort([](const FWindowState& Left, const FWindowState& Right)
+	{
+		if (Left.Definition.WindowPriority != Right.Definition.WindowPriority)
+		{
+			return Left.Definition.WindowPriority > Right.Definition.WindowPriority;
+		}
+
+		return Left.OpenSequence > Right.OpenSequence;
+	});
+}
+
+const FActAbilityChainEntry* FActAbilityChainRuntime::FindBestMatchingEntryInWindow(const FWindowState& WindowState, const FGameplayTag& CommandTag) const
+{
+	const FActAbilityChainEntry* BestEntry = nullptr;
+
+	for (const FActAbilityChainEntry& Entry : WindowState.Definition.Entries)
+	{
+		if (!Entry.IsValid() || Entry.CommandTag != CommandTag)
+		{
+			continue;
+		}
+
+		if (!BestEntry || Entry.Priority > BestEntry->Priority)
+		{
+			BestEntry = &Entry;
+		}
+	}
+
+	return BestEntry;
+}
+
+bool FActAbilityChainRuntime::IsAuthorizedRequest(const FActAbilityChainActivationRequest& Request, const double CurrentTimeSeconds) const
+{
+	if (!ActiveContext.IsValid() || Request.SourceAbilityId != ActiveContext.AbilityId)
+	{
+		return false;
+	}
+
+	TArray<const FWindowState*> CandidateWindows;
+	GatherCandidateWindows(Request.CommandTag, CurrentTimeSeconds, true, CandidateWindows);
+
+	for (const FWindowState* WindowState : CandidateWindows)
+	{
+		if (!WindowState)
+		{
+			continue;
+		}
+
+		for (const FActAbilityChainEntry& Entry : WindowState->Definition.Entries)
+		{
+			if (!Entry.IsValid())
+			{
+				continue;
+			}
+
+			if (Entry.CommandTag == Request.CommandTag && Entry.TargetAbilityId == Request.TargetAbilityId)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+void FActAbilityChainRuntime::GrantPendingActivation(const FActAbilityChainActivationRequest& Request, const double CurrentTimeSeconds)
+{
+	PendingActivation.SourceAbilityId = Request.SourceAbilityId;
+	PendingActivation.TargetAbilityId = Request.TargetAbilityId;
+	PendingActivation.SourceSpecHandle = ActiveContext.SpecHandle;
+	PendingActivation.ExpiresAtSeconds = CurrentTimeSeconds + AbilityChainAuthorizationLifetimeSeconds;
+}
+
+void FActAbilityChainRuntime::ClearPendingActivationIfMatches(const FName AbilityId)
+{
+	if (PendingActivation.TargetAbilityId == AbilityId)
+	{
+		PendingActivation.Reset();
+	}
+}
+
+void FActAbilityChainRuntime::CancelPreviousSourceAbilityIfNeeded(
+	UActAbilitySystemComponent& ActASC,
+	const FGameplayAbilitySpecHandle NewSpecHandle,
+	const FName NewAbilityId)
+{
+	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
+	if (!PendingActivation.Matches(NewAbilityId, CurrentTimeSeconds))
+	{
 		return;
 	}
 
-	RecentContext.Reset();
-	RecentContext.ChainData = ActiveContext.ChainData;
-	RecentContext.AbilityID = ActiveContext.AbilityID;
-	RecentContext.CurrentNodeId = ActiveContext.CurrentNodeId;
-	RecentContext.ExpiresAt = CurrentTimeSeconds + GraceSeconds;
+	const FGameplayAbilitySpecHandle SourceSpecHandle = PendingActivation.SourceSpecHandle;
+	PendingActivation.Reset();
 
-	for (const TPair<FGameplayTag, FWindowState>& Pair : ActiveContext.WindowStates)
+	if (!SourceSpecHandle.IsValid() || SourceSpecHandle == NewSpecHandle)
 	{
-		FWindowState SnapshotState = Pair.Value;
-		if (!SnapshotState.Sources.IsEmpty())
-		{
-			SnapshotState.LastClosedTime = CurrentTimeSeconds;
-		}
-
-		RecentContext.LastClosedWindowStates.Add(Pair.Key, SnapshotState);
+		return;
 	}
+
+	// A successful follow-up replaces the previous combo source ability.
+	ActASC.CancelAbilityByHandle(SourceSpecHandle);
 }
 
-void FActAbilityChainRuntime::ClearOpenWindowsAsClosed(const double CurrentTimeSeconds)
-{
-	for (TPair<FGameplayTag, FWindowState>& Pair : ActiveContext.WindowStates)
-	{
-		if (!Pair.Value.Sources.IsEmpty())
-		{
-			Pair.Value.Sources.Reset();
-			Pair.Value.LastClosedTime = CurrentTimeSeconds;
-			Pair.Value.LastNodeId = ActiveContext.CurrentNodeId;
-		}
-	}
-}
-
-const FActAbilityChainNode* FActAbilityChainRuntime::GetCurrentNode() const
-{
-	return GetNode(ActiveContext.ChainData.Get(), ActiveContext.CurrentNodeId);
-}
-
-const FActAbilityChainNode* FActAbilityChainRuntime::GetNode(const UActAbilityChainData* ChainData, const FName NodeId) const
-{
-	return ChainData ? ChainData->FindNode(NodeId) : nullptr;
-}
-
-bool FActAbilityChainRuntime::SatisfiesOwnedTagRequirements(const UActAbilitySystemComponent& ActASC, const FActAbilityChainTransition& Transition) const
-{
-	FGameplayTagContainer OwnedTags;
-	ActASC.GetOwnedGameplayTags(OwnedTags);
-
-	if (!Transition.BlockedOwnerTags.IsEmpty() && OwnedTags.HasAny(Transition.BlockedOwnerTags))
-	{
-		return false;
-	}
-
-	if (!Transition.RequiredOwnerTags.IsEmpty() && !OwnedTags.HasAll(Transition.RequiredOwnerTags))
-	{
-		return false;
-	}
-
-	return true;
-}
-
-bool FActAbilityChainRuntime::SatisfiesWindowRequirements(const FActAbilityChainTransition& Transition, const double CurrentTimeSeconds, const float GraceSeconds) const
-{
-	for (const FGameplayTag& WindowTag : Transition.RequiredWindowTags)
-	{
-		if (!IsWindowSatisfied(WindowTag, CurrentTimeSeconds, GraceSeconds))
-		{
-			return false;
-		}
-	}
-
-	for (const FGameplayTag& WindowTag : Transition.BlockedWindowTags)
-	{
-		const FWindowState* ActiveWindowState = ActiveContext.WindowStates.Find(WindowTag);
-		if (ActiveWindowState && !ActiveWindowState->Sources.IsEmpty())
-		{
-			return false;
-		}
-	}
-
-	return true;
-}
-
-bool FActAbilityChainRuntime::IsWindowSatisfied(const FGameplayTag& WindowTag, const double CurrentTimeSeconds, const float GraceSeconds) const
-{
-	if (!WindowTag.IsValid())
-	{
-		return true;
-	}
-
-	if (const FWindowState* ActiveWindowState = ActiveContext.WindowStates.Find(WindowTag))
-	{
-		if (ActiveWindowState->LastNodeId != ActiveContext.CurrentNodeId)
-		{
-			// Prevent "window leakage" across nodes when the same tag is reused (common for combo windows).
-			return false;
-		}
-
-		if (!ActiveWindowState->Sources.IsEmpty())
-		{
-			return true;
-		}
-
-		// Grace allows window satisfaction shortly after close time.
-		// This is a key weak-network feature: client input may be buffered and released slightly late.
-		if (GraceSeconds > 0.0f && CurrentTimeSeconds - ActiveWindowState->LastClosedTime <= GraceSeconds)
-		{
-			return true;
-		}
-	}
-
-	if (RecentContext.IsValid(CurrentTimeSeconds))
-	{
-		if (const FWindowState* RecentWindowState = RecentContext.LastClosedWindowStates.Find(WindowTag))
-		{
-			if (RecentWindowState->LastNodeId != RecentContext.CurrentNodeId)
-			{
-				return false;
-			}
-
-			return GraceSeconds > 0.0f && CurrentTimeSeconds - RecentWindowState->LastClosedTime <= GraceSeconds;
-		}
-	}
-
-	return false;
-}
-
-bool FActAbilityChainRuntime::IsAbilityTransitionAllowedFromActiveContext(
-	const UActAbilitySystemComponent& ActASC,
-	const FName TargetAbilityID,
-	const double CurrentTimeSeconds,
-	const float GraceSeconds) const
-{
-	const UActAbilityChainData* ChainData = ActiveContext.ChainData.Get();
-	const FActAbilityChainNode* CurrentNode = GetCurrentNode();
-	if (!ChainData || !CurrentNode || TargetAbilityID.IsNone())
-	{
-		return false;
-	}
-
-	for (const FActAbilityChainTransition& Transition : CurrentNode->Transitions)
-	{
-		if (Transition.TransitionType != EActAbilityChainTransitionType::Ability || Transition.TargetAbilityID != TargetAbilityID)
-		{
-			continue;
-		}
-
-		if (!SatisfiesOwnedTagRequirements(ActASC, Transition))
-		{
-			continue;
-		}
-
-		if (SatisfiesWindowRequirements(Transition, CurrentTimeSeconds, GraceSeconds))
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-bool FActAbilityChainRuntime::IsAbilityTransitionAllowedFromRecentContext(
-	const UActAbilitySystemComponent& ActASC,
-	const FName TargetAbilityID,
-	const double CurrentTimeSeconds) const
-{
-	if (!RecentContext.IsValid(CurrentTimeSeconds) || TargetAbilityID.IsNone())
-	{
-		return false;
-	}
-
-	const UActAbilityChainData* ChainData = RecentContext.ChainData.Get();
-	const FActAbilityChainNode* CurrentNode = GetNode(ChainData, RecentContext.CurrentNodeId);
-	if (!ChainData || !CurrentNode)
-	{
-		return false;
-	}
-
-	FGameplayTagContainer OwnedTags;
-	ActASC.GetOwnedGameplayTags(OwnedTags);
-
-	for (const FActAbilityChainTransition& Transition : CurrentNode->Transitions)
-	{
-		if (Transition.TransitionType != EActAbilityChainTransitionType::Ability || Transition.TargetAbilityID != TargetAbilityID)
-		{
-			continue;
-		}
-
-		if (!Transition.BlockedOwnerTags.IsEmpty() && OwnedTags.HasAny(Transition.BlockedOwnerTags))
-		{
-			continue;
-		}
-
-		if (!Transition.RequiredOwnerTags.IsEmpty() && !OwnedTags.HasAll(Transition.RequiredOwnerTags))
-		{
-			continue;
-		}
-
-		bool bAllWindowsSatisfied = true;
-		for (const FGameplayTag& WindowTag : Transition.RequiredWindowTags)
-		{
-			const FWindowState* RecentWindowState = RecentContext.LastClosedWindowStates.Find(WindowTag);
-			if (!RecentWindowState || CurrentTimeSeconds > RecentContext.ExpiresAt)
-			{
-				bAllWindowsSatisfied = false;
-				break;
-			}
-			if (RecentWindowState->LastNodeId != RecentContext.CurrentNodeId)
-			{
-				bAllWindowsSatisfied = false;
-				break;
-			}
-		}
-
-		if (!bAllWindowsSatisfied)
-		{
-			continue;
-		}
-
-		bool bAnyBlockedWindowStillHot = false;
-		for (const FGameplayTag& WindowTag : Transition.BlockedWindowTags)
-		{
-			if (const FWindowState* RecentWindowState = RecentContext.LastClosedWindowStates.Find(WindowTag))
-			{
-				if (CurrentTimeSeconds <= RecentContext.ExpiresAt &&
-					RecentWindowState->LastNodeId == RecentContext.CurrentNodeId)
-				{
-					bAnyBlockedWindowStillHot = true;
-					break;
-				}
-			}
-		}
-
-		if (bAnyBlockedWindowStillHot)
-		{
-			continue;
-		}
-
-		return true;
-	}
-
-	return false;
-}
-
-const FActAbilityChainTransition* FActAbilityChainRuntime::FindTransition(
-	const UActAbilityChainData* ChainData,
-	const FName SourceNodeId,
-	const FActAbilityChainReplicatedTransition& Transition) const
-{
-	const FActAbilityChainNode* SourceNode = GetNode(ChainData, SourceNodeId);
-	if (!SourceNode)
-	{
-		return nullptr;
-	}
-
-	for (const FActAbilityChainTransition& Candidate : SourceNode->Transitions)
-	{
-		if (Transition.IsSectionTransition())
-		{
-			if (Candidate.TransitionType == EActAbilityChainTransitionType::Section &&
-				Candidate.TargetNodeId == Transition.TargetNodeId)
-			{
-				return &Candidate;
-			}
-			continue;
-		}
-
-		if (Candidate.TransitionType == EActAbilityChainTransitionType::Ability &&
-			Candidate.TargetAbilityID == Transition.TargetAbilityID)
-		{
-			return &Candidate;
-		}
-	}
-
-	return nullptr;
-}
-
-void FActAbilityChainRuntime::AuthorizeAbilityTransition(
+bool FActAbilityChainRuntime::TryActivateChainEntry(
 	UActAbilitySystemComponent& ActASC,
-	const FActAbilityChainReplicatedTransition& Transition,
-	const double CurrentTimeSeconds,
-	const float GraceSeconds)
+	const FGameplayTag& CommandTag,
+	const FActAbilityChainEntry& Entry)
 {
-	PendingAbilityAuthorization.SourceAbilityID = Transition.SourceAbilityID;
-	PendingAbilityAuthorization.SourceNodeId = Transition.SourceNodeId;
-	PendingAbilityAuthorization.TargetAbilityID = Transition.TargetAbilityID;
-	PendingAbilityAuthorization.ExpiresAt = CurrentTimeSeconds + GraceSeconds;
-
-	if (Transition.bCancelCurrentAbility && ActiveContext.SpecHandle.IsValid())
-	{
-		ActASC.CancelAbilityByHandle(ActiveContext.SpecHandle);
-	}
-
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] AuthorizeAbility. Owner=%s SourceAbility=%s SourceNode=%s TargetAbility=%s ExpiresAt=%.3f Time=%.3f"),
-		*GetNameSafe(ActASC.GetAvatarActor()),
-		*Transition.SourceAbilityID.ToString(),
-		*Transition.SourceNodeId.ToString(),
-		*Transition.TargetAbilityID.ToString(),
-		PendingAbilityAuthorization.ExpiresAt,
-		CurrentTimeSeconds);
-}
-
-bool FActAbilityChainRuntime::JumpToNode(UActAbilitySystemComponent& ActASC, const FActAbilityChainNode& TargetNode)
-{
-	if (TargetNode.NodeId.IsNone() || TargetNode.SectionName.IsNone())
+	if (!ActiveContext.IsValid() || !Entry.IsValid())
 	{
 		return false;
 	}
 
-	const FGameplayAbilityActorInfo* ActorInfo = ActASC.AbilityActorInfo.Get();
-	UAnimInstance* AnimInstance = ActorInfo ? ActorInfo->GetAnimInstance() : nullptr;
-	UAnimMontage* CurrentMontage = ActASC.GetCurrentMontage();
-	if (!AnimInstance || !CurrentMontage || !CurrentMontage->IsValidSectionName(TargetNode.SectionName))
+	FActAbilityChainActivationRequest Request;
+	Request.SourceAbilityId = ActiveContext.AbilityId;
+	Request.CommandTag = CommandTag;
+	Request.TargetAbilityId = Entry.TargetAbilityId;
+
+	// Local prediction must pass through the same authorization function used by the server RPC path.
+	if (!ActASC.AuthorizePredictedAbilityChainActivation(Request))
 	{
 		return false;
 	}
 
-	ClearOpenWindowsAsClosed(GetCurrentTimeSeconds(ActASC));
-	AnimInstance->Montage_JumpToSection(TargetNode.SectionName, CurrentMontage);
-	ActiveContext.CurrentNodeId = TargetNode.NodeId;
-	ActiveContext.LastNodeChangeTime = GetCurrentTimeSeconds(ActASC);
+	if (ActASC.TryActivateAbilityById(Entry.TargetAbilityId, true, false, nullptr))
+	{
+		return true;
+	}
 
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] JumpToNode. Owner=%s AbilityID=%s Node=%s Section=%s Time=%.3f"),
-		*GetNameSafe(ActASC.GetAvatarActor()),
-		*ActiveContext.AbilityID.ToString(),
-		*TargetNode.NodeId.ToString(),
-		*TargetNode.SectionName.ToString(),
-		GetChainLogTimeSeconds(ActASC));
-
-	return true;
+	ClearPendingActivationIfMatches(Entry.TargetAbilityId);
+	return false;
 }

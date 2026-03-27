@@ -8,6 +8,7 @@
 #include "EnhancedInputSubsystemInterface.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
+#include "Character/ActBattleComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -24,6 +25,8 @@
 
 namespace
 {
+const FGameplayTag InputTag_StrafeMove = ActGameplayTags::FindTagByString(TEXT("InputTag.StrafeMove"), false);
+
 EInputDirection QuantizeLocalDirection(const FVector2D& LocalDirection)
 {
 	// Quantize analog stick / WASD input into 8 directions plus Neutral for command matching.
@@ -263,6 +266,7 @@ void UActHeroComponent::BeginPlay()
 
 void UActHeroComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ClearMovementInputBlocks();
 	UnregisterInitStateFeature();
 	
 	Super::EndPlay(EndPlayReason);
@@ -354,10 +358,74 @@ void UActHeroComponent::InitializePlayerInput(UInputComponent* PlayerInputCompon
 	UGameFrameworkComponentManager::SendGameFrameworkComponentExtensionEvent(const_cast<APawn*>(Pawn), NAME_BindInputsNow);
 }
 
+void UActHeroComponent::PushMovementInputBlock(UObject* Source)
+{
+	if (!Source)
+	{
+		return;
+	}
+
+	TWeakObjectPtr<UObject> SourceKey(Source);
+	int32& RefCount = MovementInputBlockSources.FindOrAdd(SourceKey);
+	RefCount = FMath::Max(0, RefCount) + 1;
+}
+
+void UActHeroComponent::PopMovementInputBlock(UObject* Source)
+{
+	if (!Source)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<UObject> SourceKey(Source);
+	if (int32* RefCount = MovementInputBlockSources.Find(SourceKey))
+	{
+		--(*RefCount);
+		if (*RefCount <= 0)
+		{
+			MovementInputBlockSources.Remove(SourceKey);
+		}
+	}
+
+	PruneMovementInputBlockSources();
+}
+
+void UActHeroComponent::ClearMovementInputBlocks()
+{
+	MovementInputBlockSources.Reset();
+}
+
+bool UActHeroComponent::IsMovementInputBlocked() const
+{
+	PruneMovementInputBlockSources();
+	return !MovementInputBlockSources.IsEmpty();
+}
+
+void UActHeroComponent::PruneMovementInputBlockSources() const
+{
+	for (auto It = MovementInputBlockSources.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid() || It.Value() <= 0)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
 void UActHeroComponent::Input_AbilityInputTagPressed(const FGameplayTag InputTag)
 {
 	if (const APawn* Pawn = GetPawn<APawn>())
 	{
+		if (InputTag.IsValid() && InputTag == InputTag_StrafeMove)
+		{
+			if (UActBattleComponent* BattleComp = Pawn->FindComponentByClass<UActBattleComponent>())
+			{
+				// Lock-on acquisition should react on the Shift press itself rather than waiting for the
+				// locomotion GA to finish activation, otherwise mid-combo lock attempts feel delayed or lost.
+				BattleComp->StartLockOnTarget();
+			}
+		}
+
 		if (const UActPawnExtensionComponent* PawnExtComp = UActPawnExtensionComponent::FindPawnExtensionComponent(Pawn))
 		{
 			if (UActAbilitySystemComponent* ActASC = PawnExtComp->GetActAbilitySystemComponent())
@@ -381,6 +449,14 @@ void UActHeroComponent::Input_AbilityInputTagReleased(const FGameplayTag InputTa
 {
 	if (const APawn* Pawn = GetPawn<APawn>())
 	{
+		if (InputTag.IsValid() && InputTag == InputTag_StrafeMove)
+		{
+			if (UActBattleComponent* BattleComp = Pawn->FindComponentByClass<UActBattleComponent>())
+			{
+				BattleComp->StopLockOnTarget();
+			}
+		}
+
 		if (const UActPawnExtensionComponent* PawnExtComp = UActPawnExtensionComponent::FindPawnExtensionComponent(Pawn))
 		{
 			if (UActAbilitySystemComponent* ActASC = PawnExtComp->GetActAbilitySystemComponent())
@@ -411,14 +487,16 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 
 	const FRotator ControlRot(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FVector WorldMoveVector = ControlRot.RotateVector(FVector(Value.Y, Value.X, 0.f));
+	const bool bMovementInputBlocked = IsMovementInputBlocked();
+	const bool bHasMeaningfulMoveInput = !Value.IsNearlyZero();
 
-	if (Value.X != 0.f)
+	if (!bMovementInputBlocked && Value.X != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::RightVector);
 		Pawn->AddMovementInput(MovementDirection, Value.X);
 	}
 
-	if (Value.Y != 0.f)
+	if (!bMovementInputBlocked && Value.Y != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::ForwardVector);
 		Pawn->AddMovementInput(MovementDirection, Value.Y);

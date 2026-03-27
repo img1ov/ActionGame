@@ -51,6 +51,14 @@ struct FActMontageRootMotionSourceSettings
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RootMotion", meta = (EditCondition = "bEnabled"))
 	bool bIgnoreZAccumulate = true;
 
+	/**
+	 * If true, zero out character movement velocity when the first extracted montage motion segment starts.
+	 * This is primarily intended for attack startup so locomotion momentum does not bleed into authored attack motion.
+	 * Section refreshes within the same task do not retrigger the brake.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RootMotion", meta = (EditCondition = "bEnabled"))
+	bool bBrakeMovementOnStart = true;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RootMotion", meta = (EditCondition = "bEnabled", ClampMin = "0"))
 	int32 Priority = 1000;
 

@@ -78,15 +78,15 @@ public:
 	/** Cancel one ability by spec handle (if active). */
 	UE_API void CancelAbilityByHandle(FGameplayAbilitySpecHandle AbilityHandle);
 
-	/** Rebuilds the AbilityID -> SpecHandle cache from currently granted abilities. */
+	/** Rebuilds the AbilityId -> SpecHandle cache from currently granted abilities. */
 	UE_API void RebuildAbilityIdCache();
 
-	/** Returns the cached spec handle for an AbilityID, or invalid if missing. */
-	UE_API FGameplayAbilitySpecHandle GetAbilitySpecHandleByID(FName AbilityID) const;
+	/** Returns the cached spec handle for an AbilityId, or invalid if missing. */
+	UE_API FGameplayAbilitySpecHandle GetAbilitySpecHandleById(FName AbilityId) const;
 
-	/** Tries to activate one granted ability by AbilityID. */
-	UE_API bool TryActivateAbilityByID(
-		FName AbilityID,
+	/** Tries to activate one granted ability by AbilityId. */
+	UE_API bool TryActivateAbilityById(
+		FName AbilityId,
 		bool bAllowRemoteActivation = true,
 		bool bCancelIfAlreadyActive = false,
 		FGameplayAbilitySpecHandle* OutActivatedSpecHandle = nullptr);
@@ -97,17 +97,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="AbilityInputTagReleased")
 	UE_API void K2_AbilityInputTagReleased(const FGameplayTag InputTag);
 
+	/** Clears the entire combo runtime state. */
 	UE_API void ResetAbilityChainRuntime();
+
+	/** True if one active ability currently owns a valid combo runtime context. */
 	UE_API bool HasActiveAbilityChain() const;
+
+	/** Combo-specific activation gate consulted from UActGameplayAbility::CanActivateAbility. */
 	UE_API bool CanActivateAbilityForChain(const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const;
+
+	/** Registers a newly activated combo source ability. */
 	UE_API void BeginAbilityChain(UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
+
+	/** Unregisters the combo source ability when it ends. */
 	UE_API void EndAbilityChain(const UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
-	UE_API void EnterAbilityChainNode(FName NodeId);
-	UE_API void OpenAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject);
-	UE_API void CloseAbilityChainWindow(const FGameplayTag& WindowTag, const UObject* SourceObject);
-	UE_API FActAbilityChainCommandResolveResult ResolveAbilityChainCommand(const FGameplayTag& CommandTag, bool bAllowAbilityActivation);
-	UE_API bool ApplyReplicatedAbilityChainTransition(const FActAbilityChainReplicatedTransition& Transition);
-	UE_API FName GetInitialAbilityChainSection(const UActGameplayAbility& Ability) const;
+
+	/** Opens one authored combo window from an AnimNotifyState. */
+	UE_API void OpenAbilityChainWindow(const FActAbilityChainWindowDefinition& WindowDefinition);
+
+	/** Closes one authored combo window by its runtime window Id. */
+	UE_API void CloseAbilityChainWindow(FName WindowId);
+
+	/** Resolves one command against the currently active combo windows. */
+	UE_API FActAbilityChainCommandResolveResult ResolveAbilityChainCommand(const FGameplayTag& CommandTag);
+
+	/** Validates and authorizes one predicted combo follow-up activation. */
+	UE_API bool AuthorizePredictedAbilityChainActivation(const FActAbilityChainActivationRequest& Request);
 	
 	UE_API void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
 	UE_API void ClearAbilityInput();
@@ -134,6 +149,8 @@ protected:
 
 	UE_API virtual void ClientTryActivateAbility_Implementation(FGameplayAbilitySpecHandle AbilityToActivate) override;
 	UE_API virtual void ClientActivateAbilityFailed_Implementation(FGameplayAbilitySpecHandle AbilityToActivate, int16 PredictionKey) override;
+	UFUNCTION(Server, Reliable)
+	void ServerAuthorizeAbilityChainActivation(const FActAbilityChainActivationRequest& Request);
 	UE_API virtual void OnGiveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRemoveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRep_ActivateAbilities() override;
@@ -145,6 +162,12 @@ protected:
 	UE_API virtual void AbilitySpecInputReleased(FGameplayAbilitySpec& Spec) override;
 
 	UE_API virtual void ApplyAbilityBlockAndCancelTags(const FGameplayTagContainer& AbilityTags, UGameplayAbility* RequestingAbility, bool bEnableBlockTags, const FGameplayTagContainer& BlockTags, bool bExecuteCancelTags, const FGameplayTagContainer& CancelTags) override;
+
+	/** True when local prediction should forward combo authorization to the authority ASC. */
+	bool ShouldForwardAbilityChainAuthorizationToServer() const;
+
+	/** Forwards GAS activation failure back into the combo runtime when the failed ability is part of the chain system. */
+	void NotifyAbilityChainActivationFailed(UGameplayAbility* Ability);
 	
 protected:
 
@@ -152,7 +175,7 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UActAbilityTagRelationshipMapping> TagRelationshipMapping;
 
-	/** Cached AbilityID -> SpecHandle map for ID-based activation. */
+	/** Cached AbilityId -> SpecHandle map for Id-based activation. */
 	TMap<FName, FGameplayAbilitySpecHandle> AbilityIdToSpecHandle;
 
 	// Handles to abilities that had their input pressed this frame.
@@ -167,6 +190,7 @@ protected:
 	// Number of abilities running in each activation group.
 	int32 ActivationGroupCounts[(uint8)EActAbilityActivationGroup::MAX];
 
+	/** Authoritative combo runtime owned by the ASC. */
 	TUniquePtr<FActAbilityChainRuntime> AbilityChainRuntime;
 };
 

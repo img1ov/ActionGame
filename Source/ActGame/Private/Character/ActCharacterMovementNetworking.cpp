@@ -6,46 +6,14 @@
 
 namespace
 {
-template <typename TObjectClass>
-bool SerializeObjectReference(FArchive& Ar, UPackageMap* PackageMap, TObjectPtr<TObjectClass>& ObjectReference)
-{
-	UObject* RawObject = ObjectReference.Get();
-	const bool bSuccess = PackageMap ? PackageMap->SerializeObject(Ar, TObjectClass::StaticClass(), RawObject) : false;
-	if (Ar.IsLoading())
-	{
-		ObjectReference = Cast<TObjectClass>(RawObject);
-	}
-
-	return bSuccess;
-}
-
 bool SerializeAddMoveSnapshot(FArchive& Ar, UPackageMap* PackageMap, FActAddMoveSnapshot& Snapshot)
 {
-	// We serialize only the fields required for server to reconstruct the same predicted AddMove state.
-	// LocalHandle is intentionally excluded (not stable across machines).
+	(void)PackageMap;
+	// Packed movement moves have a hard bit cap. Static authored parameters are not serialized here;
+	// both sides are expected to have already created the same SyncId-backed AddMove locally.
+	// We only keep elapsed time synchronized.
 	Ar << Snapshot.SyncId;
 	Ar << Snapshot.ElapsedTime;
-	Ar << Snapshot.Params.SourceType;
-	Ar << Snapshot.Params.Space;
-	Ar << Snapshot.Params.Velocity;
-	Ar << Snapshot.Params.Duration;
-	Ar << Snapshot.Params.CurveType;
-
-	if (!SerializeObjectReference(Ar, PackageMap, Snapshot.Params.Curve))
-	{
-		return false;
-	}
-
-	if (!SerializeObjectReference(Ar, PackageMap, Snapshot.Params.Montage))
-	{
-		return false;
-	}
-
-	Ar << Snapshot.Params.StartTrackPosition;
-	Ar << Snapshot.Params.EndTrackPosition;
-	Ar << Snapshot.Params.bApplyRotation;
-
-	// Params.SyncId is transient on the params struct; we mirror the serialized identity here to keep equality checks consistent.
 	Snapshot.Params.SyncId = Snapshot.SyncId;
 	return true;
 }

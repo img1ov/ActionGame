@@ -13,6 +13,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAccelerationStateChangedSignatur
 class UAnimMontage;
 class UCurveFloat;
 class USkeletalMeshComponent;
+class AActor;
 
 USTRUCT(BlueprintType)
 struct FActCharacterGroundInfo
@@ -44,11 +45,10 @@ struct FActCharacterGroundInfo
  * - Standard UE character movement behavior.
  * - Extra movement overlays ("AddMove"): explicit velocity bursts or animation-derived motion,
  *   executed inside the movement component so it participates in prediction and correction.
- * - Lightweight "cancel window" state authored by animation notifies (does not block input by itself).
  *
  * Non-responsibilities:
  * - Command matching / combo logic (lives in Input + ASC AbilityChain runtime).
- * - Ability cancellation policy (this component only exposes HasCancelWindow()).
+ * - Ability cancellation policy / cancel windows (lives in ASC / ability layer).
  */
 UCLASS()
 class ACTGAME_API UActCharacterMovementComponent : public UCharacterMovementComponent
@@ -123,21 +123,22 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|CharacterMovement|AddMove")
 	bool HasActiveAddMove() const;
 
-	/** Opens a cancel window using SourceObject as a key (multiple sources can overlap). */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|Cancel")
-	void PushCancelWindow(UObject* SourceObject);
+	/**
+	 * Submit or refresh a one-shot rotation warp toward the given target actor.
+	 *
+	 * Repeated calls overwrite the current request. The movement component will clear the request
+	 * automatically once it reaches the acceptable yaw error when bClearOnReached is true, or the
+	 * caller can clear it explicitly.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
+	void WarpTargetFromRotation(AActor* Target, EActRotationWarpType RotationType, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
 
-	/** Closes a cancel window opened by the same SourceObject. */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|Cancel")
-	void PopCancelWindow(UObject* SourceObject);
+	/** Explicitly clears the current rotation warp target. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
+	void ClearWarpTarget();
 
-	/** Clears all active cancel windows. */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|Cancel")
-	void ClearCancelWindows();
-
-	/** True if any cancel window is active (at least one valid source is present). */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|CharacterMovement|Cancel")
-	bool HasCancelWindow() const;
+	/** C++ accessor used by abilities/notifies to inspect the current warp request, if any. */
+	const FActRotationWarpRequest* GetRotationWarpTarget() const;
 
 protected:
 	
@@ -153,6 +154,8 @@ protected:
 private:
 	struct FActVelocityAdditionState;
 
+	/** Applies a one-shot rotation warp request before lock-on/default rotation logic. */
+	bool TryApplyRotationWarp(float DeltaTime);
 	bool TryApplyStrafeRotation(float DeltaTime);
 	int32 SetAddMoveInternal(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle);
 	FVector ConsumeAddMoveDisplacement(float DeltaSeconds, FQuat& OutRotationDelta);
@@ -219,8 +222,8 @@ protected:
 	/** SyncId -> handle mapping for network-stable entries (section refresh uses this to "update" not "add"). */
 	TMap<int32, int32> VelocityAdditionMapBySyncId;
 
-	/** Active cancel window sources (notify instances); any valid source means "cancel window open". */
-	TSet<TWeakObjectPtr<UObject>> CancelWindowSources;
+	/** Current one-shot rotation warp request; cleared once aligned or when the target becomes invalid. */
+	FActRotationWarpRequest RotationWarpTarget;
 
 	/** Custom network move data payload container (New/Pending/Old) used by CMC RPC packing. */
 	mutable FActCharacterNetworkMoveDataContainer NetworkMoveDataContainer;

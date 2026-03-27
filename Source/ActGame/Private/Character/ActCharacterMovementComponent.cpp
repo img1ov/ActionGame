@@ -136,42 +136,29 @@ bool UActCharacterMovementComponent::HasActiveAddMove() const
 	return VelocityAdditionMap.Num() > 0;
 }
 
-void UActCharacterMovementComponent::PushCancelWindow(UObject* SourceObject)
+void UActCharacterMovementComponent::WarpTargetFromRotation(AActor* Target, EActRotationWarpType RotationType, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
 {
-	if (!SourceObject)
+	if (!IsValid(Target))
 	{
+		ClearWarpTarget();
 		return;
 	}
 
-	CancelWindowSources.Add(SourceObject);
+	RotationWarpTarget.Target = Target;
+	RotationWarpTarget.RotationType = RotationType;
+	RotationWarpTarget.RotationRate = FMath::Max(0.0f, InRotationRate);
+	RotationWarpTarget.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
+	RotationWarpTarget.bClearOnReached = bClearOnReached;
 }
 
-void UActCharacterMovementComponent::PopCancelWindow(UObject* SourceObject)
+void UActCharacterMovementComponent::ClearWarpTarget()
 {
-	if (!SourceObject)
-	{
-		return;
-	}
-
-	CancelWindowSources.Remove(SourceObject);
+	RotationWarpTarget = FActRotationWarpRequest();
 }
 
-void UActCharacterMovementComponent::ClearCancelWindows()
+const FActRotationWarpRequest* UActCharacterMovementComponent::GetRotationWarpTarget() const
 {
-	CancelWindowSources.Reset();
-}
-
-bool UActCharacterMovementComponent::HasCancelWindow() const
-{
-	for (const TWeakObjectPtr<UObject>& SourceObject : CancelWindowSources)
-	{
-		if (SourceObject.IsValid())
-		{
-			return true;
-		}
-	}
-
-	return false;
+	return RotationWarpTarget.Target.IsValid() ? &RotationWarpTarget : nullptr;
 }
 
 FNetworkPredictionData_Client* UActCharacterMovementComponent::GetPredictionData_Client() const
@@ -296,6 +283,13 @@ void UActCharacterMovementComponent::SetReplicatedAcceleration(const FVector& In
 
 void UActCharacterMovementComponent::PhysicsRotation(float DeltaTime)
 {
+	// Explicit rotation warp tasks outrank lock-on. They are authored one-shot alignment requests
+	// for combat movement, not long-lived target ownership.
+	if (TryApplyRotationWarp(DeltaTime))
+	{
+		return;
+	}
+
 	const IGameplayTagAssetInterface* TagInterface = Cast<IGameplayTagAssetInterface>(CharacterOwner);
 	const bool bStrafeMoveActive = TagInterface && TagInterface->HasMatchingGameplayTag(Event_Movement_StrafeMove);
 	if (bStrafeMoveActive)
@@ -308,6 +302,70 @@ void UActCharacterMovementComponent::PhysicsRotation(float DeltaTime)
 	Super::PhysicsRotation(DeltaTime);
 }
 
+bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
+{
+	if (!CharacterOwner || !UpdatedComponent)
+	{
+		return false;
+	}
+
+	const FActRotationWarpRequest* WarpRequest = GetRotationWarpTarget();
+	if (!WarpRequest)
+	{
+		return false;
+	}
+
+	AActor* TargetActor = WarpRequest->Target.Get();
+	if (!TargetActor)
+	{
+		ClearWarpTarget();
+		return false;
+	}
+
+	FVector DesiredDirection = FVector::ZeroVector;
+	switch (WarpRequest->RotationType)
+	{
+	case EActRotationWarpType::Default:
+		DesiredDirection = TargetActor->GetActorForwardVector();
+		break;
+	case EActRotationWarpType::OppositeDefault:
+		DesiredDirection = -TargetActor->GetActorForwardVector();
+		break;
+	case EActRotationWarpType::Facing:
+		DesiredDirection = TargetActor->GetActorLocation() - CharacterOwner->GetActorLocation();
+		break;
+	case EActRotationWarpType::OppositeFacing:
+		DesiredDirection = CharacterOwner->GetActorLocation() - TargetActor->GetActorLocation();
+		break;
+	default:
+		break;
+	}
+
+	DesiredDirection.Z = 0.0f;
+	if (DesiredDirection.IsNearlyZero())
+	{
+		ClearWarpTarget();
+		return false;
+	}
+
+	const FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
+	FRotator DesiredRotation = DesiredDirection.Rotation();
+	DesiredRotation.Pitch = 0.0f;
+	DesiredRotation.Roll = 0.0f;
+
+	const float RotationSpeed = WarpRequest->RotationRate > UE_SMALL_NUMBER ? WarpRequest->RotationRate : RotationRate.Yaw;
+	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, DeltaTime, RotationSpeed);
+	MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
+
+	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(NewRotation.Yaw, DesiredRotation.Yaw));
+	if (WarpRequest->bClearOnReached && YawError <= WarpRequest->AcceptableYawError)
+	{
+		ClearWarpTarget();
+	}
+
+	return true;
+}
+
 bool UActCharacterMovementComponent::TryApplyStrafeRotation(float DeltaTime)
 {
 	if (!CharacterOwner || !UpdatedComponent)
@@ -315,7 +373,9 @@ bool UActCharacterMovementComponent::TryApplyStrafeRotation(float DeltaTime)
 		return false;
 	}
 
-	// Only apply lock-on facing while the character is actually moving.
+	// Strafe movement itself only owns "lock-on locomotion" facing.
+	// Attack abilities that want a turn-in-place / align-on-start should request an explicit
+	// one-shot rotation warp on activation instead of relying on this path.
 	const bool bHasMoveInput = GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER || Velocity.SizeSquared2D() > KINDA_SMALL_NUMBER;
 	if (!bHasMoveInput)
 	{
@@ -674,6 +734,25 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 	bool bChanged = false;
 	for (const FActAddMoveSnapshot& Snapshot : Snapshots)
 	{
+		if (bNetworkSynchronizedOnly)
+		{
+			if (Snapshot.SyncId == INDEX_NONE)
+			{
+				continue;
+			}
+
+			if (const int32* ExistingSyncHandle = VelocityAdditionMapBySyncId.Find(Snapshot.SyncId))
+			{
+				if (FActVelocityAdditionState* State = VelocityAdditionMap.Find(*ExistingSyncHandle))
+				{
+					State->ElapsedTime = Snapshot.ElapsedTime;
+					bChanged = true;
+				}
+			}
+
+			continue;
+		}
+
 		int32 ExistingHandle = INDEX_NONE;
 		if (Snapshot.SyncId != INDEX_NONE)
 		{

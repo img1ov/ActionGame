@@ -77,6 +77,7 @@ public:
 	/** Debug/inspection only: analyzer internals are not mutation API. */
 	UE_API const FActBattleInputAnalyzer* GetInputAnalyzer() const { return BattleInputAnalyzer.Get(); }
 	
+	/** Clears ASC-owned combo runtime state. The player controller itself does not own combo state. */
 	UE_API void ClearAbilityChainCache();
 	
 protected:
@@ -129,13 +130,11 @@ private:
 	UFUNCTION()
 	void OnPlayerStateChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam);
 
-	UFUNCTION(Server, Reliable)
-	void ServerRelayAbilityChainTransition(FActAbilityChainReplicatedTransition Transition);
-
 private:
 	
 	TUniquePtr<FActBattleInputAnalyzer> BattleInputAnalyzer;
-	TUniquePtr<FActBattleCommandResolver> ComboRuntime;
+	/** Stateless adapter that bridges matched commands into the ASC-owned combo runtime. */
+	TUniquePtr<FActBattleCommandResolver> CommandResolver;
 	FActInputCommandMatched InputCommandMatched;
 	EInputDirection CurrentAnalyzerDirection = EInputDirection::Neutral;
 	TArray<FGameplayTag> PendingAbilityInputPressed;

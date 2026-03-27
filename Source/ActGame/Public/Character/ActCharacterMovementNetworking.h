@@ -39,8 +39,12 @@ struct FActAddMoveSnapshot
 /**
  * Per-move custom payload sent through CharacterMovement RPCs.
  *
- * We serialize active AddMove snapshots so the server can simulate the same
- * motion that the client predicted (reduces correction jitter under bad network).
+ * We serialize only the network identity + elapsed time for active AddMove snapshots.
+ *
+ * Important:
+ * - Static authored parameters (montage/range/duration/etc.) are *not* replicated through movement RPCs.
+ * - Those are expected to be created locally by gameplay/ability code on both client and server.
+ * - Movement RPCs only keep already-existing AddMove entries in sync, which keeps packed move size small.
  */
 struct FActCharacterNetworkMoveData : public FCharacterNetworkMoveData
 {
@@ -49,7 +53,7 @@ struct FActCharacterNetworkMoveData : public FCharacterNetworkMoveData
 	/** Copies data from the FSavedMove (client-side) into this move payload. */
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 
-	/** Serializes AddMove snapshots along with the default Character movement fields. */
+	/** Serializes AddMove sync state along with the default Character movement fields. */
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
 
 	/** Active predicted AddMove states for this movement frame. */

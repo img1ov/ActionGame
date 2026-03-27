@@ -4,6 +4,7 @@
 
 #include "Components/GameFrameworkInitStateInterface.h"
 #include "Components/PawnComponent.h"
+#include "GameplayTagContainer.h"
 #include "Input/ActInputConfig.h"
 
 #include "ActHeroComponent.generated.h"
@@ -65,6 +66,32 @@ protected:
 	UE_API void Input_LookMouse(const FInputActionValue& InputActionValue);
 
 public:
+
+	/**
+	 * Blocks locomotion input at the input-entry layer.
+	 *
+	 * Only AddMovementInput is blocked. Direction data still flows into the command analyzer so
+	 * combat input matching continues to work during authored movement-lock windows.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Act|Input")
+	UE_API void PushMovementInputBlock(UObject* Source);
+
+	/** Removes one movement-input block source. */
+	UFUNCTION(BlueprintCallable, Category = "Act|Input")
+	UE_API void PopMovementInputBlock(UObject* Source);
+
+	/** Clears all movement-input block sources. */
+	UFUNCTION(BlueprintCallable, Category = "Act|Input")
+	UE_API void ClearMovementInputBlocks();
+
+	/** True if any valid movement-input block source is active. */
+	UFUNCTION(BlueprintPure, Category = "Act|Input")
+	UE_API bool IsMovementInputBlocked() const;
+
+	/** Returns the active source ref-counts; empty means locomotion input is currently allowed. */
+	const TMap<TWeakObjectPtr<UObject>, int32>& GetMovementInputBlockSources() const { return MovementInputBlockSources; }
+
+public:
 	
 	/** The name of the extension event sent via UGameFrameworkComponentManager when ability inputs are ready to bind */
 	static UE_API const FName NAME_BindInputsNow;
@@ -82,6 +109,19 @@ protected:
 
 	/** True when player input bindings have been applied, will never be true for non - players */
 	bool bReadyToBindInputs;
+
+	/**
+	 * Source-tracked movement input blocks.
+	 *
+	 * We use ref-counting instead of a plain set because the same notify/source may legitimately
+	 * re-enter before the previous scope ended (section jumps, montage refresh, overlap windows).
+	 * Input stays blocked until the last matching Pop is received.
+	 */
+	mutable TMap<TWeakObjectPtr<UObject>, int32> MovementInputBlockSources;
+
+private:
+
+	void PruneMovementInputBlockSources() const;
 };
 
 #undef UE_API

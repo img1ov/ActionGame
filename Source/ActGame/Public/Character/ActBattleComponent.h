@@ -16,7 +16,11 @@ class AActor;
 ACTGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Movement_StrafeMove);
 /**
  * Component that centralizes battle-related state and routing.
- * Lock-on selection/replication is handled here to keep gameplay abilities modular.
+ * Responsibilities:
+ * - Lock-on selection/replication (long-lived combat target).
+ *
+ * Deliberately does not own temporary movement/rotation warp tasks. Those belong to CharacterMovement
+ * so they can stay as low-level execution primitives instead of battle-layer semantics.
  */
 UCLASS(MinimalAPI, Blueprintable, Meta = (BlueprintSpawnableComponent))
 class UActBattleComponent : public UPawnComponent
@@ -52,7 +56,8 @@ private:
 	AActor* FindLockOnTargetByCameraTrace() const;
 	AActor* FindLockOnTargetByProximity() const;
 
-	bool IsValidLockOnTarget(const AActor* Target) const;
+	/** Shared combat-target validity for queries that consume hostile/lockable targets. */
+	bool IsValidBattleTarget(const AActor* Target) const;
 	bool IsTargetInRange(const AActor* Target, float MaxDistance) const;
 	bool ShouldClearLockOnTarget(const AActor* Target) const;
 

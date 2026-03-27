@@ -34,7 +34,7 @@ AActPlayerController::AActPlayerController(const FObjectInitializer& ObjectIniti
 	: Super(ObjectInitializer)
 {
 	BattleInputAnalyzer = MakeUnique<FActBattleInputAnalyzer>();
-	ComboRuntime = MakeUnique<FActBattleCommandResolver>();
+	CommandResolver = MakeUnique<FActBattleCommandResolver>();
 	BattleInputAnalyzer->SetOnCommandMatchedDelegate(
 		FActOnInputCommandMatched::CreateUObject(this, &ThisClass::HandleInputCommandMatched));
 }
@@ -307,9 +307,9 @@ void AActPlayerController::ConfigureInputCommandDefinitions(const TArray<FInputC
 
 	BattleInputAnalyzer->SetCommandDefinitions(InCommandDefinitions);
 	BattleInputAnalyzer->ResetCommandBuffer();
-	if (ComboRuntime.IsValid())
+	if (CommandResolver.IsValid())
 	{
-		ComboRuntime->Reset();
+		CommandResolver->Reset();
 	}
 	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponent())
 	{
@@ -332,7 +332,7 @@ void AActPlayerController::HandleInputCommandMatched(const FGameplayTag& Command
 
 void AActPlayerController::ResolveBufferedCommand(UActAbilitySystemComponent& ActASC)
 {
-	if (!BattleInputAnalyzer.IsValid() || !ComboRuntime.IsValid())
+	if (!BattleInputAnalyzer.IsValid() || !CommandResolver.IsValid())
 	{
 		return;
 	}
@@ -346,17 +346,11 @@ void AActPlayerController::ResolveBufferedCommand(UActAbilitySystemComponent& Ac
 		return;
 	}
 
-	FActAbilityChainReplicatedTransition ServerRelayTransition;
 	bool bShouldConsumeCommand = true;
-	const EActBattleCommandResolveResult ResolveResult = ComboRuntime->ResolveCommand(ActASC, BufferedCommandTag, ServerRelayTransition, bShouldConsumeCommand);
+	const EActBattleCommandResolveResult ResolveResult = CommandResolver->ResolveCommand(ActASC, BufferedCommandTag, bShouldConsumeCommand);
 	if (ResolveResult == EActBattleCommandResolveResult::NotHandled)
 	{
 		return;
-	}
-
-	if (ServerRelayTransition.IsValid() && IsLocalController() && !HasAuthority())
-	{
-		ServerRelayAbilityChainTransition(ServerRelayTransition);
 	}
 
 	if (bShouldConsumeCommand)
@@ -484,17 +478,4 @@ void AActPlayerController::ClearAbilityChainCache()
 void AActPlayerController::OnPlayerStateChanged()
 {
 	// Empty, place for derived classes to implement without having to hook all the other events
-}
-
-void AActPlayerController::ServerRelayAbilityChainTransition_Implementation(const FActAbilityChainReplicatedTransition Transition)
-{
-	if (!ComboRuntime.IsValid())
-	{
-		return;
-	}
-
-	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponent())
-	{
-		ComboRuntime->ApplyReplicatedTransition(*ActASC, Transition);
-	}
 }

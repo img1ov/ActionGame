@@ -16,6 +16,38 @@
 
 namespace
 {
+bool ResolveMontageSectionTrackRange(const UAnimMontage* Montage, const int32 SectionIndex, float& OutStartTrackPosition, float& OutEndTrackPosition)
+{
+	if (!Montage || SectionIndex == INDEX_NONE || !Montage->CompositeSections.IsValidIndex(SectionIndex))
+	{
+		return false;
+	}
+
+	const FCompositeSection& Section = Montage->CompositeSections[SectionIndex];
+	const float MontageLength = Montage->GetPlayLength();
+	const float SectionStartTrackPosition = FMath::Clamp(Section.GetTime(), 0.0f, MontageLength);
+
+	float SectionEndTrackPosition = MontageLength;
+	for (int32 NextSectionIndex = SectionIndex + 1; NextSectionIndex < Montage->CompositeSections.Num(); ++NextSectionIndex)
+	{
+		const float CandidateStartTrackPosition = FMath::Clamp(Montage->CompositeSections[NextSectionIndex].GetTime(), 0.0f, MontageLength);
+		if (CandidateStartTrackPosition > SectionStartTrackPosition + UE_SMALL_NUMBER)
+		{
+			SectionEndTrackPosition = CandidateStartTrackPosition;
+			break;
+		}
+	}
+
+	if (SectionEndTrackPosition <= SectionStartTrackPosition + UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	OutStartTrackPosition = SectionStartTrackPosition;
+	OutEndTrackPosition = SectionEndTrackPosition;
+	return true;
+}
+
 bool ResolveMontageRootMotionTrackRange(
 	const UAnimMontage* Montage,
 	const FName StartSectionName,
@@ -35,7 +67,10 @@ bool ResolveMontageRootMotionTrackRange(
 	const int32 StartSectionIndex = StartSectionName.IsNone() ? INDEX_NONE : Montage->GetSectionIndex(StartSectionName);
 	if (StartSectionIndex != INDEX_NONE)
 	{
-		Montage->GetSectionStartAndEndTime(StartSectionIndex, StartTrackPosition, EndTrackPosition);
+		if (!ResolveMontageSectionTrackRange(Montage, StartSectionIndex, StartTrackPosition, EndTrackPosition))
+		{
+			return false;
+		}
 	}
 
 	switch (Settings.RangeMode)
@@ -50,7 +85,11 @@ bool ResolveMontageRootMotionTrackRange(
 			if (EndSectionIndex != INDEX_NONE)
 			{
 				float SectionStart = 0.0f;
-				Montage->GetSectionStartAndEndTime(EndSectionIndex, SectionStart, EndTrackPosition);
+				float SectionEnd = 0.0f;
+				if (ResolveMontageSectionTrackRange(Montage, EndSectionIndex, SectionStart, SectionEnd))
+				{
+					EndTrackPosition = SectionEnd;
+				}
 			}
 		}
 		break;
@@ -69,8 +108,13 @@ bool ResolveMontageRootMotionTrackRange(
 		return false;
 	}
 
-	OutStartTrackPosition = StartTrackPosition;
-	OutEndTrackPosition = EndTrackPosition;
+	OutStartTrackPosition = FMath::Clamp(StartTrackPosition, 0.0f, MontageLength);
+	OutEndTrackPosition = FMath::Clamp(EndTrackPosition, 0.0f, MontageLength);
+	if (OutEndTrackPosition <= OutStartTrackPosition + UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
 	return true;
 }
 }
@@ -123,13 +167,6 @@ void UAT_PlayMontageAndWaitForEvent::Activate()
 			EventHandle = ActASC->AddGameplayEventTagContainerDelegate(EventTags, FGameplayEventTagMulticastDelegate::FDelegate::CreateUObject(this, &ThisClass::OnGameplayEvent));
 
 			FName EffectiveStartSection = StartSection;
-			if (EffectiveStartSection.IsNone())
-			{
-				if (const UActGameplayAbility* ActAbility = Cast<UActGameplayAbility>(Ability))
-				{
-					EffectiveStartSection = ActAbility->GetInitialAbilityChainSection();
-				}
-			}
 
 			if (ActASC->PlayMontage(Ability, Ability->GetCurrentActivationInfo(), MontageToPlay, Rate, EffectiveStartSection) > 0.f)
 			{
@@ -366,7 +403,25 @@ bool UAT_PlayMontageAndWaitForEvent::RefreshPredictedMotionForSection(const FNam
 	float RootMotionEndTrackPosition = 0.0f;
 	if (!ResolveMontageRootMotionTrackRange(MontageToPlay, SectionName, RootMotionSourceSettings, RootMotionStartTrackPosition, RootMotionEndTrackPosition))
 	{
-		UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] ExtractedRootMotion range invalid. Ability=%s Montage=%s StartSection=%s"),
+		if (RootMotionSourceID != 0)
+		{
+			MovementComponent->RemoveRootMotionSourceByID(RootMotionSourceID);
+			RootMotionSourceID = 0;
+		}
+
+		if (AddMoveHandle != INDEX_NONE)
+		{
+			if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(MovementComponent))
+			{
+				ActMovementComponent->StopAddMove(AddMoveHandle);
+			}
+			AddMoveHandle = INDEX_NONE;
+		}
+
+		// Treat degenerate / zero-length sections as "no authored motion in this section" instead of
+		// a hard runtime failure. Mark the section as processed so TickTask does not retry every frame.
+		LastAppliedMotionSection = SectionName;
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] ExtractedRootMotion skipped. Ability=%s Montage=%s StartSection=%s"),
 			*GetNameSafe(Ability),
 			*GetNameSafe(MontageToPlay),
 			*SectionName.ToString());
@@ -374,10 +429,23 @@ bool UAT_PlayMontageAndWaitForEvent::RefreshPredictedMotionForSection(const FNam
 	}
 
 	const float ExtractedDuration = FMath::Abs(RootMotionEndTrackPosition - RootMotionStartTrackPosition) / FMath::Max(FMath::Abs(Rate), UE_SMALL_NUMBER);
+	if (ExtractedDuration <= UE_SMALL_NUMBER)
+	{
+		LastAppliedMotionSection = SectionName;
+		return false;
+	}
+
 	if (RootMotionSourceSettings.ExecutionMode == EActMontageMotionExecutionMode::AddMove)
 	{
 		if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(MovementComponent))
 		{
+			if (AddMoveHandle == INDEX_NONE && RootMotionSourceSettings.bBrakeMovementOnStart)
+			{
+				// Attack startup should normally override locomotion immediately instead of inheriting
+				// pre-attack run speed into the authored forward motion.
+				ActMovementComponent->StopMovementImmediately();
+			}
+
 			AddMoveHandle = ActMovementComponent->SetAddMoveFromMontage(
 				MontageToPlay,
 				RootMotionStartTrackPosition,

@@ -1,24 +1,7 @@
 #include "AbilitySystem/AbilityChain/ActAbilityChainNotifies.h"
 
 #include "AbilitySystem/AbilityChain/ActAbilityChainNotifyUtils.h"
-
-void UAN_AbilityChainNode::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
-{
-	Super::Notify(MeshComp, Animation, EventReference);
-
-	(void)Animation;
-	(void)EventReference;
-
-	if (NodeId.IsNone())
-	{
-		return;
-	}
-
-	if (UActAbilitySystemComponent* ActASC = ActAbilityChainNotifyUtils::ResolveActASC(MeshComp))
-	{
-		ActASC->EnterAbilityChainNode(NodeId);
-	}
-}
+#include "Misc/Crc.h"
 
 void UANS_AbilityChainWindow::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
 {
@@ -28,14 +11,9 @@ void UANS_AbilityChainWindow::NotifyBegin(USkeletalMeshComponent* MeshComp, UAni
 	(void)TotalDuration;
 	(void)EventReference;
 
-	if (!WindowTag.IsValid())
-	{
-		return;
-	}
-
 	if (UActAbilitySystemComponent* ActASC = ActAbilityChainNotifyUtils::ResolveActASC(MeshComp))
 	{
-		ActASC->OpenAbilityChainWindow(WindowTag, this);
+		ActASC->OpenAbilityChainWindow(BuildWindowDefinition());
 	}
 }
 
@@ -46,13 +24,26 @@ void UANS_AbilityChainWindow::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimS
 	(void)Animation;
 	(void)EventReference;
 
-	if (!WindowTag.IsValid())
-	{
-		return;
-	}
-
 	if (UActAbilitySystemComponent* ActASC = ActAbilityChainNotifyUtils::ResolveActASC(MeshComp))
 	{
-		ActASC->CloseAbilityChainWindow(WindowTag, this);
+		ActASC->CloseAbilityChainWindow(GetWindowId());
 	}
+}
+
+FActAbilityChainWindowDefinition UANS_AbilityChainWindow::BuildWindowDefinition() const
+{
+	// The authored notify owns its entire combo window definition.
+	FActAbilityChainWindowDefinition WindowDefinition;
+	WindowDefinition.WindowId = GetWindowId();
+	WindowDefinition.WindowPriority = WindowPriority;
+	WindowDefinition.Entries = Entries;
+	return WindowDefinition;
+}
+
+FName UANS_AbilityChainWindow::GetWindowId() const
+{
+	// Hashing the notify object path yields a deterministic per-placement runtime Id
+	// without introducing another manually-maintained asset field.
+	const uint32 PathHash = FCrc::StrCrc32(*GetPathName());
+	return FName(*FString::Printf(TEXT("AbilityChainWindow_%08X"), PathHash));
 }

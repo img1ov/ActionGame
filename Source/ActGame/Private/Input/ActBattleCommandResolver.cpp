@@ -22,31 +22,25 @@ void FActBattleCommandResolver::Reset()
 EActBattleCommandResolveResult FActBattleCommandResolver::ResolveCommand(
 	UActAbilitySystemComponent& ActASC,
 	const FGameplayTag& CommandTag,
-	FActAbilityChainReplicatedTransition& OutServerRelayTransition,
 	bool& bOutShouldConsumeCommand)
 {
-	OutServerRelayTransition = FActAbilityChainReplicatedTransition();
 	bOutShouldConsumeCommand = true;
 	if (!CommandTag.IsValid())
 	{
 		return EActBattleCommandResolveResult::NotHandled;
 	}
 
-	const FActAbilityChainCommandResolveResult ChainResult = ActASC.ResolveAbilityChainCommand(CommandTag, true);
+	const FActAbilityChainCommandResolveResult ChainResult = ActASC.ResolveAbilityChainCommand(CommandTag);
 	if (ChainResult.WasHandled())
 	{
-		// All chain authority lives in ASC; input layer only relays the chosen transition to server.
-		// This keeps matching and execution separate and avoids duplicating window logic in input code.
-		OutServerRelayTransition = ChainResult.ToReplicatedTransition();
+		// All combo authority lives in ASC; the input layer only consumes the resolved command.
 		bOutShouldConsumeCommand = ChainResult.bConsumeInput;
-		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleCommand] Chain resolved. Owner=%s Command=%s Mode=%d SourceNode=%s AbilityID=%s Node=%s Relay=%d Time=%.3f"),
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleCommand] Chain resolved. Owner=%s Command=%s Mode=%d SourceAbilityId=%s TargetAbilityId=%s Time=%.3f"),
 			*GetNameSafe(ActASC.GetAvatarActor()),
 			*CommandTag.ToString(),
 			static_cast<int32>(ChainResult.Resolution),
-			*ChainResult.SourceNodeId.ToString(),
-			*ChainResult.TargetAbilityID.ToString(),
-			*ChainResult.TargetNodeId.ToString(),
-			OutServerRelayTransition.IsValid(),
+			*ChainResult.SourceAbilityId.ToString(),
+			*ChainResult.TargetAbilityId.ToString(),
 			GetResolverTimeSeconds(ActASC));
 		return EActBattleCommandResolveResult::Activated;
 	}
@@ -72,21 +66,4 @@ EActBattleCommandResolveResult FActBattleCommandResolver::ResolveCommand(
 		GetResolverTimeSeconds(ActASC));
 
 	return bActivated ? EActBattleCommandResolveResult::Activated : EActBattleCommandResolveResult::NotHandled;
-}
-
-void FActBattleCommandResolver::ApplyReplicatedTransition(UActAbilitySystemComponent& ActASC, const FActAbilityChainReplicatedTransition& Transition)
-{
-	if (!Transition.IsValid())
-	{
-		return;
-	}
-
-	const bool bApplied = ActASC.ApplyReplicatedAbilityChainTransition(Transition);
-	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleCommand] Replicated chain apply. Owner=%s SourceNode=%s TargetAbility=%s TargetNode=%s Applied=%d Time=%.3f"),
-		*GetNameSafe(ActASC.GetAvatarActor()),
-		*Transition.SourceNodeId.ToString(),
-		*Transition.TargetAbilityID.ToString(),
-		*Transition.TargetNodeId.ToString(),
-		bApplied,
-		GetResolverTimeSeconds(ActASC));
 }

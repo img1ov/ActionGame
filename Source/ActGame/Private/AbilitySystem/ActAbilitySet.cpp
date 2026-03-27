@@ -150,6 +150,6 @@ void UActAbilitySet::GiveToAbilitySystem(UActAbilitySystemComponent* ActASC, FAc
 		}
 	}
 
-	// Refresh AbilityID cache after granting abilities from this set.
+	// Refresh the AbilityId cache after granting abilities from this set.
 	ActASC->RebuildAbilityIdCache();
 }

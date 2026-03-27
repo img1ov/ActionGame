@@ -6,6 +6,7 @@
 #include "ActCharacterMovementTypes.generated.h"
 
 class UAnimMontage;
+class AActor;
 
 /**
  * Coordinate space used by AddMove.
@@ -50,6 +51,51 @@ enum class EActAddMoveSourceType : uint8
 {
 	Velocity,
 	MontageRootMotion
+};
+
+/**
+ * Rotation alignment primitive used by procedural combat movement.
+ *
+ * It intentionally mirrors the common authoring intent behind MotionWarping rotation targets while
+ * remaining independent from animation root motion. The movement component executes the rotation and
+ * clears the request once aligned within tolerance.
+ */
+UENUM(BlueprintType)
+enum class EActRotationWarpType : uint8
+{
+	/** Match the target actor's facing direction. */
+	Default,
+	/** Match the opposite of the target actor's facing direction. */
+	OppositeDefault,
+	/** Turn to face the target actor's current location. */
+	Facing,
+	/** Turn so our back points at the target actor's current location. */
+	OppositeFacing,
+};
+
+/** Runtime rotation warp request consumed by CharacterMovement. */
+struct FActRotationWarpRequest
+{
+	/** Weak target reference so authored requests fail gracefully when the target is destroyed. */
+	TWeakObjectPtr<AActor> Target;
+
+	/** How to derive the desired facing from the target. */
+	EActRotationWarpType RotationType = EActRotationWarpType::Facing;
+
+	/** Constant yaw speed used while rotating toward the desired facing. */
+	float RotationRate = 720.0f;
+
+	/** Auto-clear threshold once the yaw delta is within tolerance. */
+	float AcceptableYawError = 2.0f;
+
+	/**
+	 * If true, the request is treated as a one-shot alignment task and is cleared as soon as
+	 * the movement component reaches AcceptableYawError.
+	 *
+	 * This should normally stay enabled for attack startup alignment so strafe / lock-on facing
+	 * can take over again immediately after the authored turn-in completes.
+	 */
+	bool bClearOnReached = true;
 };
 
 /**

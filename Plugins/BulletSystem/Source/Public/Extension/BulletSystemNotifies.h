@@ -1,7 +1,8 @@
 #pragma once
 
 // BulletSystem: BulletSystemNotifies.h
-// Native AnimNotifies used to integrate BulletSystem with montage notifies + GAS gameplay events.
+// Native AnimNotifies used as the animation-facing extension layer for BulletSystem.
+// They only expose authored parameters and forward execution into the extension dispatcher.
 
 #include "CoreMinimal.h"
 #include "Animation/AnimNotifies/AnimNotify.h"

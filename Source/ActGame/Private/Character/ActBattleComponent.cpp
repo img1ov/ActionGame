@@ -65,13 +65,17 @@ void UActBattleComponent::StartLockOnTarget()
 		return;
 	}
 
-	// Always clear the previous target before reacquiring.
-	SetLockOnTarget(nullptr);
-
 	AActor* NewTarget = nullptr;
 	if (bIsLocallyControlled || bIsBotControlled)
 	{
 		NewTarget = FindLockOnTarget();
+	}
+
+	// Reacquisition should be non-destructive. If the current target is still valid and we fail to
+	// find a better candidate this frame, keep the existing lock instead of momentarily clearing it.
+	if (!NewTarget && !ShouldClearLockOnTarget(CurrentLockOnTarget))
+	{
+		NewTarget = CurrentLockOnTarget;
 	}
 
 	if (bIsAuthority)
@@ -112,7 +116,7 @@ void UActBattleComponent::ServerSetLockOnTarget_Implementation(AActor* NewTarget
 		return;
 	}
 
-	if (!IsValidLockOnTarget(NewTarget))
+	if (!IsValidBattleTarget(NewTarget))
 	{
 		NewTarget = nullptr;
 	}
@@ -187,7 +191,7 @@ AActor* UActBattleComponent::FindLockOnTargetByCameraTrace() const
 	FHitResult Hit;
 	if (GetWorld()->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjectParams, Params))
 	{
-		if (IsValidLockOnTarget(Hit.GetActor()))
+		if (IsValidBattleTarget(Hit.GetActor()))
 		{
 			return Hit.GetActor();
 		}
@@ -222,7 +226,7 @@ AActor* UActBattleComponent::FindLockOnTargetByProximity() const
 	for (const FOverlapResult& Result : Overlaps)
 	{
 		AActor* Candidate = Result.GetActor();
-		if (!IsValidLockOnTarget(Candidate))
+		if (!IsValidBattleTarget(Candidate))
 		{
 			continue;
 		}
@@ -238,7 +242,7 @@ AActor* UActBattleComponent::FindLockOnTargetByProximity() const
 	return BestTarget;
 }
 
-bool UActBattleComponent::IsValidLockOnTarget(const AActor* Target) const
+bool UActBattleComponent::IsValidBattleTarget(const AActor* Target) const
 {
 	if (!IsValid(Target))
 	{
@@ -275,7 +279,7 @@ bool UActBattleComponent::IsTargetInRange(const AActor* Target, float MaxDistanc
 
 bool UActBattleComponent::ShouldClearLockOnTarget(const AActor* Target) const
 {
-	if (!IsValidLockOnTarget(Target))
+	if (!IsValidBattleTarget(Target))
 	{
 		return true;
 	}
