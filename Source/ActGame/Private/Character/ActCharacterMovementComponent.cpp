@@ -34,7 +34,7 @@ int32 UActCharacterMovementComponent::SetAddMoveWorld(FVector WorldVelocity, flo
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
-	return SetAddMoveInternal(Params, nullptr, ExistingHandle);
+	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
 int32 UActCharacterMovementComponent::SetAddMove(FVector LocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle)
@@ -46,7 +46,7 @@ int32 UActCharacterMovementComponent::SetAddMove(FVector LocalVelocity, float Du
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
-	return SetAddMoveInternal(Params, nullptr, ExistingHandle);
+	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
 int32 UActCharacterMovementComponent::SetAddMoveWithMesh(USkeletalMeshComponent* Mesh, FVector MeshLocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle)
@@ -58,10 +58,15 @@ int32 UActCharacterMovementComponent::SetAddMoveWithMesh(USkeletalMeshComponent*
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
+	return ApplyAddMoveParams(Params, Mesh, ExistingHandle);
+}
+
+int32 UActCharacterMovementComponent::ApplyAddMoveParams(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle)
+{
 	return SetAddMoveInternal(Params, Mesh, ExistingHandle);
 }
 
-int32 UActCharacterMovementComponent::SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation, int32 ExistingHandle, int32 SyncId)
+int32 UActCharacterMovementComponent::SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation, bool bIgnoreZAccumulate, int32 ExistingHandle, int32 SyncId)
 {
 	FActAddMoveParams Params;
 	Params.SourceType = EActAddMoveSourceType::MontageRootMotion;
@@ -71,12 +76,13 @@ int32 UActCharacterMovementComponent::SetAddMoveFromMontage(UAnimMontage* Montag
 	Params.StartTrackPosition = StartTrackPosition;
 	Params.EndTrackPosition = EndTrackPosition;
 	Params.bApplyRotation = bApplyRotation;
+	Params.bIgnoreZAccumulate = bIgnoreZAccumulate;
 	Params.SyncId = SyncId;
 
 	// Important: montage-derived movement is still executed as "AddMove" (i.e. displacement overlay),
 	// not as native montage root motion. The montage is free to play for visuals/events while the
 	// authoritative movement is simulated here for prediction + networking.
-	return SetAddMoveInternal(Params, nullptr, ExistingHandle);
+	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
 bool UActCharacterMovementComponent::StopAddMove(int32 Handle)
@@ -86,7 +92,8 @@ bool UActCharacterMovementComponent::StopAddMove(int32 Handle)
 		return false;
 	}
 
-	RemoveAddMoveMappings(Handle, VelocityAdditionMap.Find(Handle));
+	const FActVelocityAdditionState* RemovedState = VelocityAdditionMap.Find(Handle);
+	RemoveAddMoveMappings(Handle, RemovedState);
 
 	const bool bRemoved = VelocityAdditionMap.Remove(Handle) > 0;
 	if (bRemoved)
@@ -136,29 +143,65 @@ bool UActCharacterMovementComponent::HasActiveAddMove() const
 	return VelocityAdditionMap.Num() > 0;
 }
 
-void UActCharacterMovementComponent::WarpTargetFromRotation(AActor* Target, EActRotationWarpType RotationType, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
+void UActCharacterMovementComponent::WarpRotationToActor(AActor* Target, EActRotationWarpActorMode ActorMode, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
 {
 	if (!IsValid(Target))
 	{
-		ClearWarpTarget();
+		ClearRotationWarp();
 		return;
 	}
 
-	RotationWarpTarget.Target = Target;
-	RotationWarpTarget.RotationType = RotationType;
-	RotationWarpTarget.RotationRate = FMath::Max(0.0f, InRotationRate);
-	RotationWarpTarget.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
-	RotationWarpTarget.bClearOnReached = bClearOnReached;
+	RotationWarpRequest = FActRotationWarpRequest();
+	RotationWarpRequest.bIsSet = true;
+	RotationWarpRequest.SourceType = EActRotationWarpSourceType::Actor;
+	RotationWarpRequest.TargetActor = Target;
+	RotationWarpRequest.ActorMode = ActorMode;
+	RotationWarpRequest.RotationRate = FMath::Max(0.0f, InRotationRate);
+	RotationWarpRequest.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
+	RotationWarpRequest.bClearOnReached = bClearOnReached;
 }
 
-void UActCharacterMovementComponent::ClearWarpTarget()
+void UActCharacterMovementComponent::WarpRotationToDirection(FVector WorldDirection, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
 {
-	RotationWarpTarget = FActRotationWarpRequest();
+	WorldDirection.Z = 0.0f;
+	if (WorldDirection.IsNearlyZero())
+	{
+		ClearRotationWarp();
+		return;
+	}
+
+	RotationWarpRequest = FActRotationWarpRequest();
+	RotationWarpRequest.bIsSet = true;
+	RotationWarpRequest.SourceType = EActRotationWarpSourceType::Direction;
+	RotationWarpRequest.Direction = WorldDirection.GetSafeNormal();
+	RotationWarpRequest.RotationRate = FMath::Max(0.0f, InRotationRate);
+	RotationWarpRequest.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
+	RotationWarpRequest.bClearOnReached = bClearOnReached;
 }
 
-const FActRotationWarpRequest* UActCharacterMovementComponent::GetRotationWarpTarget() const
+void UActCharacterMovementComponent::ClearRotationWarp()
 {
-	return RotationWarpTarget.Target.IsValid() ? &RotationWarpTarget : nullptr;
+	RotationWarpRequest = FActRotationWarpRequest();
+}
+
+const FActRotationWarpRequest* UActCharacterMovementComponent::GetRotationWarpRequest() const
+{
+	if (!RotationWarpRequest.bIsSet)
+	{
+		return nullptr;
+	}
+
+	if (RotationWarpRequest.SourceType == EActRotationWarpSourceType::Actor && !RotationWarpRequest.TargetActor.IsValid())
+	{
+		return nullptr;
+	}
+
+	if (RotationWarpRequest.SourceType == EActRotationWarpSourceType::Direction && RotationWarpRequest.Direction.IsNearlyZero())
+	{
+		return nullptr;
+	}
+
+	return &RotationWarpRequest;
 }
 
 FNetworkPredictionData_Client* UActCharacterMovementComponent::GetPredictionData_Client() const
@@ -309,33 +352,45 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 		return false;
 	}
 
-	const FActRotationWarpRequest* WarpRequest = GetRotationWarpTarget();
+	const FActRotationWarpRequest* WarpRequest = GetRotationWarpRequest();
 	if (!WarpRequest)
 	{
 		return false;
 	}
 
-	AActor* TargetActor = WarpRequest->Target.Get();
-	if (!TargetActor)
-	{
-		ClearWarpTarget();
-		return false;
-	}
-
 	FVector DesiredDirection = FVector::ZeroVector;
-	switch (WarpRequest->RotationType)
+	switch (WarpRequest->SourceType)
 	{
-	case EActRotationWarpType::Default:
-		DesiredDirection = TargetActor->GetActorForwardVector();
+	case EActRotationWarpSourceType::Actor:
+		{
+			AActor* TargetActor = WarpRequest->TargetActor.Get();
+			if (!TargetActor)
+			{
+				ClearRotationWarp();
+				return false;
+			}
+
+			switch (WarpRequest->ActorMode)
+			{
+			case EActRotationWarpActorMode::MatchTargetForward:
+				DesiredDirection = TargetActor->GetActorForwardVector();
+				break;
+			case EActRotationWarpActorMode::MatchOppositeTargetForward:
+				DesiredDirection = -TargetActor->GetActorForwardVector();
+				break;
+			case EActRotationWarpActorMode::FaceTarget:
+				DesiredDirection = TargetActor->GetActorLocation() - CharacterOwner->GetActorLocation();
+				break;
+			case EActRotationWarpActorMode::BackToTarget:
+				DesiredDirection = CharacterOwner->GetActorLocation() - TargetActor->GetActorLocation();
+				break;
+			default:
+				break;
+			}
+		}
 		break;
-	case EActRotationWarpType::OppositeDefault:
-		DesiredDirection = -TargetActor->GetActorForwardVector();
-		break;
-	case EActRotationWarpType::Facing:
-		DesiredDirection = TargetActor->GetActorLocation() - CharacterOwner->GetActorLocation();
-		break;
-	case EActRotationWarpType::OppositeFacing:
-		DesiredDirection = CharacterOwner->GetActorLocation() - TargetActor->GetActorLocation();
+	case EActRotationWarpSourceType::Direction:
+		DesiredDirection = WarpRequest->Direction;
 		break;
 	default:
 		break;
@@ -344,7 +399,7 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 	DesiredDirection.Z = 0.0f;
 	if (DesiredDirection.IsNearlyZero())
 	{
-		ClearWarpTarget();
+		ClearRotationWarp();
 		return false;
 	}
 
@@ -360,7 +415,7 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(NewRotation.Yaw, DesiredRotation.Yaw));
 	if (WarpRequest->bClearOnReached && YawError <= WarpRequest->AcceptableYawError)
 	{
-		ClearWarpTarget();
+		ClearRotationWarp();
 	}
 
 	return true;
@@ -415,6 +470,7 @@ int32 UActCharacterMovementComponent::SetAddMoveInternal(const FActAddMoveParams
 	}
 
 	const int32 Handle = AcquireAddMoveHandle(ExistingHandle, Params.SyncId);
+
 	FActVelocityAdditionState& State = VelocityAdditionMap.FindOrAdd(Handle);
 	RemoveAddMoveMappings(Handle, &State);
 	State.Handle = Handle;
@@ -436,12 +492,28 @@ int32 UActCharacterMovementComponent::SetAddMoveInternal(const FActAddMoveParams
 	return Handle;
 }
 
+bool UActCharacterMovementComponent::StopAddMoveBySyncId(const int32 SyncId)
+{
+	if (SyncId == INDEX_NONE)
+	{
+		return false;
+	}
+
+	if (const int32* Handle = VelocityAdditionMapBySyncId.Find(SyncId))
+	{
+		return StopAddMove(*Handle);
+	}
+
+	return false;
+}
+
 FVector UActCharacterMovementComponent::ConsumeAddMoveDisplacement(float DeltaSeconds, FQuat& OutRotationDelta)
 {
 	FVector TotalDisplacement = FVector::ZeroVector;
 	OutRotationDelta = FQuat::Identity;
 
 	TArray<int32> HandlesToRemove;
+	HandlesToRemove.Reserve(VelocityAdditionMap.Num());
 	for (TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
 	{
 		const int32 Handle = Pair.Key;
@@ -487,10 +559,7 @@ FVector UActCharacterMovementComponent::ConsumeAddMoveDisplacement(float DeltaSe
 		}
 	}
 
-	for (const int32 Handle : HandlesToRemove)
-	{
-		StopAddMove(Handle);
-	}
+	RemoveAddMoves(HandlesToRemove);
 
 	return TotalDisplacement;
 }
@@ -551,6 +620,13 @@ FVector UActCharacterMovementComponent::ResolveAddMoveDisplacement(const FActAdd
 		{
 			bOutHasRotationDelta = !DeltaTransform.GetRotation().Equals(FQuat::Identity);
 			OutRotationDelta = DeltaTransform.GetRotation();
+		}
+
+		if (Params.bIgnoreZAccumulate)
+		{
+			FVector Translation = DeltaTransform.GetTranslation();
+			Translation.Z = 0.0f;
+			DeltaTransform.SetTranslation(Translation);
 		}
 
 		// Convert animation root motion translation into world space.
@@ -629,6 +705,34 @@ void UActCharacterMovementComponent::RemoveAddMoveMappings(int32 Handle, const F
 	}
 }
 
+void UActCharacterMovementComponent::RemoveAddMoves(const TArray<int32>& Handles)
+{
+	if (Handles.IsEmpty())
+	{
+		return;
+	}
+
+	bool bRemovedAny = false;
+	for (const int32 Handle : Handles)
+	{
+		if (Handle == INDEX_NONE)
+		{
+			continue;
+		}
+
+		RemoveAddMoveMappings(Handle, VelocityAdditionMap.Find(Handle));
+		bRemovedAny |= VelocityAdditionMap.Remove(Handle) > 0;
+	}
+
+	if (!bRemovedAny)
+	{
+		return;
+	}
+
+	++AddMoveStateRevision;
+	UpdateAddMoveNetworkCorrectionMode();
+}
+
 void UActCharacterMovementComponent::ApplyPendingAddMove(float DeltaSeconds)
 {
 	if (bApplyingAddMove || !UpdatedComponent || VelocityAdditionMap.IsEmpty() || DeltaSeconds <= UE_SMALL_NUMBER)
@@ -666,6 +770,7 @@ void UActCharacterMovementComponent::ApplyPendingAddMove(float DeltaSeconds)
 void UActCharacterMovementComponent::CaptureAddMoveSnapshots(TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& OutSnapshots) const
 {
 	OutSnapshots.Reset();
+	OutSnapshots.Reserve(VelocityAdditionMap.Num());
 
 	for (const TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
 	{
@@ -692,24 +797,28 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 			FMath::IsNearlyEqual(A.StartTrackPosition, B.StartTrackPosition) &&
 			FMath::IsNearlyEqual(A.EndTrackPosition, B.EndTrackPosition) &&
 			A.bApplyRotation == B.bApplyRotation &&
+			A.bIgnoreZAccumulate == B.bIgnoreZAccumulate &&
 			A.SyncId == B.SyncId;
 	};
 
-	TSet<int32> IncomingSyncIds;
-	TSet<int32> IncomingLocalHandles;
+	TArray<int32, TInlineAllocator<4>> IncomingSyncIds;
+	TArray<int32, TInlineAllocator<4>> IncomingLocalHandles;
+	IncomingSyncIds.Reserve(Snapshots.Num());
+	IncomingLocalHandles.Reserve(Snapshots.Num());
 	for (const FActAddMoveSnapshot& Snapshot : Snapshots)
 	{
 		if (Snapshot.SyncId != INDEX_NONE)
 		{
-			IncomingSyncIds.Add(Snapshot.SyncId);
+			IncomingSyncIds.AddUnique(Snapshot.SyncId);
 		}
 		if (!bNetworkSynchronizedOnly && Snapshot.LocalHandle != INDEX_NONE)
 		{
-			IncomingLocalHandles.Add(Snapshot.LocalHandle);
+			IncomingLocalHandles.AddUnique(Snapshot.LocalHandle);
 		}
 	}
 
 	TArray<int32> HandlesToRemove;
+	HandlesToRemove.Reserve(VelocityAdditionMap.Num());
 	for (const TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
 	{
 		const FActVelocityAdditionState& State = Pair.Value;
@@ -724,10 +833,7 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 
 	// Phase 1: remove any local AddMove entries that do not exist in incoming snapshot set.
 	// This keeps both sides in sync and prevents "ghost" motion continuing after prediction is corrected.
-	for (const int32 Handle : HandlesToRemove)
-	{
-		StopAddMove(Handle);
-	}
+	RemoveAddMoves(HandlesToRemove);
 
 	// Phase 2: add/update incoming entries.
 	// If SyncId matches, we update in-place (stable identity across section refresh / branch changes).
@@ -789,7 +895,7 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 
 void UActCharacterMovementComponent::UpdateAddMoveNetworkCorrectionMode()
 {
-	const bool bHasAddMove = VelocityAdditionMap.Num() > 0;
+	const bool bHasAddMove = !VelocityAdditionMap.IsEmpty();
 	if (bHasAddMove == bAddMoveNetworkCorrectionOverrideActive)
 	{
 		return;

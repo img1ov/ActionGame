@@ -44,11 +44,14 @@ struct FActCharacterGroundInfo
  * Responsibilities:
  * - Standard UE character movement behavior.
  * - Extra movement overlays ("AddMove"): explicit velocity bursts or animation-derived motion,
- *   executed inside the movement component so it participates in prediction and correction.
+ *   executed inside the movement component so it participates in owner-local prediction and correction.
+ * - One-shot procedural facing alignment via RotationWarp, again intended for locally controlled motion.
  *
  * Non-responsibilities:
  * - Command matching / combo logic (lives in Input + ASC AbilityChain runtime).
  * - Ability cancellation policy / cancel windows (lives in ASC / ability layer).
+ * - Pure server-authoritative movement presentation. If a move does not need owner-local prediction
+ *   benefits, prefer UE/GAS native montage root motion or server-authoritative root motion tasks.
  */
 UCLASS()
 class ACTGAME_API UActCharacterMovementComponent : public UCharacterMovementComponent
@@ -98,6 +101,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	int32 SetAddMoveWithMesh(USkeletalMeshComponent* Mesh, FVector MeshLocalVelocity, float Duration, EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant, UCurveFloat* Curve = nullptr, int32 ExistingHandle = -1);
 
+	/** Low-level authored AddMove entry point shared by task helpers and internal utilities. */
+	int32 ApplyAddMoveParams(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh = nullptr, int32 ExistingHandle = INDEX_NONE);
+
 	/**
 	 * Adds an animation-derived AddMove by sampling root motion on a montage track range.
 	 *
@@ -105,7 +111,7 @@ public:
 	 * and instead execute the extracted displacement through the movement component so it becomes
 	 * predictable and network-alignable (via SyncId).
 	 */
-	int32 SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation = false, int32 ExistingHandle = INDEX_NONE, int32 SyncId = INDEX_NONE);
+	int32 SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation = false, bool bIgnoreZAccumulate = true, int32 ExistingHandle = INDEX_NONE, int32 SyncId = INDEX_NONE);
 
 	/** Stops one AddMove entry by handle. */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
@@ -114,6 +120,9 @@ public:
 	/** Stops a mesh-scoped AddMove entry (if one is currently associated with the mesh). */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	bool StopAddMoveWithMesh(USkeletalMeshComponent* Mesh);
+
+	/** Stops one AddMove entry by stable SyncId. */
+	bool StopAddMoveBySyncId(int32 SyncId);
 
 	/** Stops and clears all active AddMove entries. */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
@@ -124,21 +133,30 @@ public:
 	bool HasActiveAddMove() const;
 
 	/**
-	 * Submit or refresh a one-shot rotation warp toward the given target actor.
+	 * Submit or refresh a one-shot rotation warp toward a target actor.
 	 *
-	 * Repeated calls overwrite the current request. The movement component will clear the request
-	 * automatically once it reaches the acceptable yaw error when bClearOnReached is true, or the
-	 * caller can clear it explicitly.
+	 * Repeated calls overwrite the current request. This is intended for local/predicted combat
+	 * movement where authored facing alignment should happen inside the movement framework rather
+	 * than through server-authoritative montage/root-motion behavior.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
-	void WarpTargetFromRotation(AActor* Target, EActRotationWarpType RotationType, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
+	void WarpRotationToActor(AActor* Target, EActRotationWarpActorMode ActorMode, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
 
-	/** Explicitly clears the current rotation warp target. */
+	/**
+	 * Submit or refresh a one-shot rotation warp toward an explicit world-space direction.
+	 *
+	 * Use this when gameplay already knows the desired facing basis, for example acceleration,
+	 * velocity, input intent, or an authored aim direction.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
-	void ClearWarpTarget();
+	void WarpRotationToDirection(FVector WorldDirection, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
+
+	/** Explicitly clears the current rotation warp request. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
+	void ClearRotationWarp();
 
 	/** C++ accessor used by abilities/notifies to inspect the current warp request, if any. */
-	const FActRotationWarpRequest* GetRotationWarpTarget() const;
+	const FActRotationWarpRequest* GetRotationWarpRequest() const;
 
 protected:
 	
@@ -165,6 +183,7 @@ private:
 	int32 AcquireAddMoveHandle(int32 ExistingHandle, int32 SyncId);
 	void ApplyPendingAddMove(float DeltaSeconds);
 	void RemoveAddMoveMappings(int32 Handle, const FActVelocityAdditionState* State);
+	void RemoveAddMoves(const TArray<int32>& Handles);
 	void CaptureAddMoveSnapshots(TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& OutSnapshots) const;
 	void RestoreAddMoveSnapshots(const TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& Snapshots, bool bNetworkSynchronizedOnly);
 	uint32 GetAddMoveStateRevision() const { return AddMoveStateRevision; }
@@ -222,8 +241,8 @@ protected:
 	/** SyncId -> handle mapping for network-stable entries (section refresh uses this to "update" not "add"). */
 	TMap<int32, int32> VelocityAdditionMapBySyncId;
 
-	/** Current one-shot rotation warp request; cleared once aligned or when the target becomes invalid. */
-	FActRotationWarpRequest RotationWarpTarget;
+	/** Current one-shot rotation warp request; cleared once aligned or when the source becomes invalid. */
+	FActRotationWarpRequest RotationWarpRequest;
 
 	/** Custom network move data payload container (New/Pending/Old) used by CMC RPC packing. */
 	mutable FActCharacterNetworkMoveDataContainer NetworkMoveDataContainer;

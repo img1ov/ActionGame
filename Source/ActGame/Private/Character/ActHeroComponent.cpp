@@ -476,6 +476,10 @@ void UActHeroComponent::Input_AbilityInputTagReleased(const FGameplayTag InputTa
 
 void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 {
+	// Cache raw move intent before any gameplay/movement gating so other systems can query the
+	// latest authored direction even while locomotion is temporarily blocked.
+	MoveInputVector = InputActionValue.Get<FVector2D>();
+
 	APawn* Pawn = GetPawn<APawn>();
 	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
 	if (!Pawn || !Controller)
@@ -483,7 +487,7 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 		return;
 	}
 
-	const FVector2D Value = InputActionValue.Get<FVector2D>();
+	const FVector2D Value = MoveInputVector;
 
 	const FRotator ControlRot(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FVector WorldMoveVector = ControlRot.RotateVector(FVector(Value.Y, Value.X, 0.f));
@@ -511,6 +515,36 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 		// Analyzer consumes character-relative direction rather than world-space direction.
 		ActPC->PushDirectionToAnalyzer(QuantizeLocalDirection(LocalDirection));
 	}
+}
+
+FVector UActHeroComponent::GetMoveInputDirectionFromActor() const
+{
+	const APawn* Pawn = GetPawn<APawn>();
+	if (!Pawn || MoveInputVector.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	FVector MoveDirection =
+		Pawn->GetActorRightVector() * MoveInputVector.X +
+		Pawn->GetActorForwardVector() * MoveInputVector.Y;
+	MoveDirection.Z = 0.0f;
+	return MoveDirection.GetSafeNormal();
+}
+
+FVector UActHeroComponent::GetMoveInputDirectionFromController() const
+{
+	const APawn* Pawn = GetPawn<APawn>();
+	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
+	if (!Pawn || !Controller || MoveInputVector.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FRotator ControlYawRotation(0.0f, Controller->GetControlRotation().Yaw, 0.0f);
+	FVector MoveDirection = ControlYawRotation.RotateVector(FVector(MoveInputVector.Y, MoveInputVector.X, 0.0f));
+	MoveDirection.Z = 0.0f;
+	return MoveDirection.GetSafeNormal();
 }
 
 void UActHeroComponent::Input_LookMouse(const FInputActionValue& InputActionValue)

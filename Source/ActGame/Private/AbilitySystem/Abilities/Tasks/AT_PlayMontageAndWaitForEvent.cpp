@@ -6,8 +6,6 @@
 #include "AbilitySystemGlobals.h"
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
-#include "AbilitySystem/Abilities/ActGameplayAbility.h"
-#include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 #include "Animation/AnimMontage.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "GameFramework/Character.h"
@@ -16,6 +14,33 @@
 
 namespace
 {
+bool CanApplyLocalMontageMotion(const ACharacter* Character, const UGameplayAbility* Ability)
+{
+	if (!Character || !Ability)
+	{
+		return false;
+	}
+
+	if (Character->GetLocalRole() == ROLE_Authority)
+	{
+		return true;
+	}
+
+	if (Character->GetLocalRole() != ROLE_AutonomousProxy)
+	{
+		return false;
+	}
+
+	switch (Ability->GetNetExecutionPolicy())
+	{
+	case EGameplayAbilityNetExecutionPolicy::LocalPredicted:
+	case EGameplayAbilityNetExecutionPolicy::ServerInitiated:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool ResolveMontageSectionTrackRange(const UAnimMontage* Montage, const int32 SectionIndex, float& OutStartTrackPosition, float& OutEndTrackPosition)
 {
 	if (!Montage || SectionIndex == INDEX_NONE || !Montage->CompositeSections.IsValidIndex(SectionIndex))
@@ -48,10 +73,11 @@ bool ResolveMontageSectionTrackRange(const UAnimMontage* Montage, const int32 Se
 	return true;
 }
 
-bool ResolveMontageRootMotionTrackRange(
+bool ResolveMontageMotionTrackRange(
 	const UAnimMontage* Montage,
 	const FName StartSectionName,
-	const FActMontageRootMotionSourceSettings& Settings,
+	const EActMontageMotionRangeMode RangeMode,
+	const FName EndSectionName,
 	float& OutStartTrackPosition,
 	float& OutEndTrackPosition)
 {
@@ -73,15 +99,15 @@ bool ResolveMontageRootMotionTrackRange(
 		}
 	}
 
-	switch (Settings.RangeMode)
+	switch (RangeMode)
 	{
-	case EActMontageRootMotionRangeMode::CurrentSection:
+	case EActMontageMotionRangeMode::CurrentSection:
 		break;
 
-	case EActMontageRootMotionRangeMode::ThroughSection:
-		if (!Settings.EndSectionName.IsNone())
+	case EActMontageMotionRangeMode::ThroughSection:
+		if (!EndSectionName.IsNone())
 		{
-			const int32 EndSectionIndex = Montage->GetSectionIndex(Settings.EndSectionName);
+			const int32 EndSectionIndex = Montage->GetSectionIndex(EndSectionName);
 			if (EndSectionIndex != INDEX_NONE)
 			{
 				float SectionStart = 0.0f;
@@ -94,7 +120,7 @@ bool ResolveMontageRootMotionTrackRange(
 		}
 		break;
 
-	case EActMontageRootMotionRangeMode::EntireMontage:
+	case EActMontageMotionRangeMode::EntireMontage:
 		if (StartSectionIndex == INDEX_NONE)
 		{
 			StartTrackPosition = 0.0f;
@@ -130,7 +156,7 @@ UAT_PlayMontageAndWaitForEvent::UAT_PlayMontageAndWaitForEvent(const FObjectInit
 UAT_PlayMontageAndWaitForEvent* UAT_PlayMontageAndWaitForEvent::CreatePlayMontageAndWaitForEvent(
 	UGameplayAbility* OwningAbility, FName TaskInstanceName, UAnimMontage* MontageToPlay,
 	FGameplayTagContainer EventTags, float Rate, FName StartSection, bool bStopWhenAbilityEnds,
-	float AnimRootMotionTranslationScale)
+	float AnimRootMotionTranslationScale, FActMontageMotionSettings MontageMotionSettings)
 {
 	UAbilitySystemGlobals::NonShipping_ApplyGlobalAbilityScaler_Rate(Rate);
 
@@ -141,10 +167,7 @@ UAT_PlayMontageAndWaitForEvent* UAT_PlayMontageAndWaitForEvent::CreatePlayMontag
 	NewTask->StartSection = StartSection;
 	NewTask->AnimRootMotionTranslationScale = AnimRootMotionTranslationScale;
 	NewTask->bStopWhenAbilityEnds = bStopWhenAbilityEnds;
-	if (const UActGameplayAbility* ActAbility = Cast<UActGameplayAbility>(OwningAbility))
-	{
-		NewTask->RootMotionSourceSettings = ActAbility->GetMontageRootMotionSourceSettings();
-	}
+	NewTask->MontageMotionSettings = MontageMotionSettings;
 
 	return NewTask;
 }
@@ -185,15 +208,13 @@ void UAT_PlayMontageAndWaitForEvent::Activate()
 				AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, MontageToPlay);
 
 				ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
-				const bool bCanApplyPredictedMotion = Character &&
-					(Character->GetLocalRole() == ROLE_Authority ||
-					(Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted));
+				const bool bCanApplyLocalMontageMotion = CanApplyLocalMontageMotion(Character, Ability);
 
-				if (RootMotionSourceSettings.bEnabled && bCanApplyPredictedMotion && MontageToPlay && Rate > UE_SMALL_NUMBER)
+				if (MontageMotionSettings.bEnabled && bCanApplyLocalMontageMotion && MontageToPlay && Rate > UE_SMALL_NUMBER)
 				{
 					RefreshPredictedMotionForSection(EffectiveStartSection);
 				}
-				else if (bCanApplyPredictedMotion)
+				else if (bCanApplyLocalMontageMotion)
 				{
 					Character->SetAnimRootMotionTranslationScale(AnimRootMotionTranslationScale);
 				}
@@ -227,7 +248,7 @@ void UAT_PlayMontageAndWaitForEvent::TickTask(float DeltaTime)
 {
 	Super::TickTask(DeltaTime);
 
-	if (!RootMotionSourceSettings.bEnabled || !MontageToPlay || Rate <= UE_SMALL_NUMBER)
+	if (!MontageMotionSettings.bEnabled || !MontageToPlay || Rate <= UE_SMALL_NUMBER)
 	{
 		return;
 	}
@@ -287,15 +308,6 @@ void UAT_PlayMontageAndWaitForEvent::OnDestroy(bool bInOwnerFinished)
 
 	if (ACharacter* Character = Cast<ACharacter>(GetAvatarActor()))
 	{
-		if (RootMotionSourceID != 0)
-		{
-			if (UCharacterMovementComponent* MovementComponent = Character->GetCharacterMovement())
-			{
-				MovementComponent->RemoveRootMotionSourceByID(RootMotionSourceID);
-			}
-			RootMotionSourceID = 0;
-		}
-
 		if (AddMoveHandle != INDEX_NONE)
 		{
 			if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(Character->GetCharacterMovement()))
@@ -399,16 +411,10 @@ bool UAT_PlayMontageAndWaitForEvent::RefreshPredictedMotionForSection(const FNam
 		return false;
 	}
 
-	float RootMotionStartTrackPosition = 0.0f;
-	float RootMotionEndTrackPosition = 0.0f;
-	if (!ResolveMontageRootMotionTrackRange(MontageToPlay, SectionName, RootMotionSourceSettings, RootMotionStartTrackPosition, RootMotionEndTrackPosition))
+	float MotionStartTrackPosition = 0.0f;
+	float MotionEndTrackPosition = 0.0f;
+	if (!ResolveMontageMotionTrackRange(MontageToPlay, SectionName, MontageMotionSettings.RangeMode, MontageMotionSettings.EndSectionName, MotionStartTrackPosition, MotionEndTrackPosition))
 	{
-		if (RootMotionSourceID != 0)
-		{
-			MovementComponent->RemoveRootMotionSourceByID(RootMotionSourceID);
-			RootMotionSourceID = 0;
-		}
-
 		if (AddMoveHandle != INDEX_NONE)
 		{
 			if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(MovementComponent))
@@ -421,72 +427,43 @@ bool UAT_PlayMontageAndWaitForEvent::RefreshPredictedMotionForSection(const FNam
 		// Treat degenerate / zero-length sections as "no authored motion in this section" instead of
 		// a hard runtime failure. Mark the section as processed so TickTask does not retry every frame.
 		LastAppliedMotionSection = SectionName;
-		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] ExtractedRootMotion skipped. Ability=%s Montage=%s StartSection=%s"),
+		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] ExtractedMontageMotion skipped. Ability=%s Montage=%s StartSection=%s"),
 			*GetNameSafe(Ability),
 			*GetNameSafe(MontageToPlay),
 			*SectionName.ToString());
 		return false;
 	}
 
-	const float ExtractedDuration = FMath::Abs(RootMotionEndTrackPosition - RootMotionStartTrackPosition) / FMath::Max(FMath::Abs(Rate), UE_SMALL_NUMBER);
+	const float ExtractedDuration = FMath::Abs(MotionEndTrackPosition - MotionStartTrackPosition) / FMath::Max(FMath::Abs(Rate), UE_SMALL_NUMBER);
 	if (ExtractedDuration <= UE_SMALL_NUMBER)
 	{
 		LastAppliedMotionSection = SectionName;
 		return false;
 	}
 
-	if (RootMotionSourceSettings.ExecutionMode == EActMontageMotionExecutionMode::AddMove)
+	if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(MovementComponent))
 	{
-		if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(MovementComponent))
+		if (AddMoveHandle == INDEX_NONE && MontageMotionSettings.bBrakeMovementOnStart)
 		{
-			if (AddMoveHandle == INDEX_NONE && RootMotionSourceSettings.bBrakeMovementOnStart)
-			{
-				// Attack startup should normally override locomotion immediately instead of inheriting
-				// pre-attack run speed into the authored forward motion.
-				ActMovementComponent->StopMovementImmediately();
-			}
-
-			AddMoveHandle = ActMovementComponent->SetAddMoveFromMontage(
-				MontageToPlay,
-				RootMotionStartTrackPosition,
-				RootMotionEndTrackPosition,
-				ExtractedDuration,
-				RootMotionSourceSettings.bApplyRotation,
-				AddMoveHandle,
-				GetOrCreateMotionSyncId());
-			LastAppliedMotionSection = SectionName;
-			return AddMoveHandle != INDEX_NONE;
+			// Attack startup should normally override locomotion immediately instead of inheriting
+			// pre-attack run speed into the authored forward motion.
+			ActMovementComponent->StopMovementImmediately();
 		}
 
-		return false;
+		AddMoveHandle = ActMovementComponent->SetAddMoveFromMontage(
+			MontageToPlay,
+			MotionStartTrackPosition,
+			MotionEndTrackPosition,
+			ExtractedDuration,
+			MontageMotionSettings.bApplyRotation,
+			MontageMotionSettings.bIgnoreZAccumulate,
+			AddMoveHandle,
+			GetOrCreateMotionSyncId());
+		LastAppliedMotionSection = SectionName;
+		return AddMoveHandle != INDEX_NONE;
 	}
 
-	if (RootMotionSourceID != 0)
-	{
-		MovementComponent->RemoveRootMotionSourceByID(RootMotionSourceID);
-		RootMotionSourceID = 0;
-	}
-
-	TSharedPtr<FActRootMotionSource_Montage> RootMotionSource = MakeShared<FActRootMotionSource_Montage>();
-	RootMotionSource->InstanceName = InstanceName.IsNone() ? FName(TEXT("ActExtractedMontageRootMotion")) : InstanceName;
-	RootMotionSource->Priority = static_cast<uint16>(FMath::Clamp(RootMotionSourceSettings.Priority, 0, MAX_uint16));
-	RootMotionSource->Montage = MontageToPlay;
-	RootMotionSource->StartTrackPosition = RootMotionStartTrackPosition;
-	RootMotionSource->EndTrackPosition = RootMotionEndTrackPosition;
-	RootMotionSource->Duration = ExtractedDuration;
-	RootMotionSource->bApplyRotation = RootMotionSourceSettings.bApplyRotation;
-	RootMotionSource->bIgnoreZAccumulate = RootMotionSourceSettings.bIgnoreZAccumulate;
-	RootMotionSource->FinishVelocityParams.Mode = RootMotionSourceSettings.FinishVelocityMode;
-	RootMotionSource->FinishVelocityParams.SetVelocity = RootMotionSourceSettings.FinishSetVelocity;
-	RootMotionSource->FinishVelocityParams.ClampVelocity = RootMotionSourceSettings.FinishClampVelocity;
-	if (RootMotionSourceSettings.bIgnoreZAccumulate)
-	{
-		RootMotionSource->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
-	}
-
-	RootMotionSourceID = MovementComponent->ApplyRootMotionSource(RootMotionSource);
-	LastAppliedMotionSection = SectionName;
-	return RootMotionSourceID != 0;
+	return false;
 }
 
 FName UAT_PlayMontageAndWaitForEvent::GetCurrentMontageSectionName() const
@@ -536,10 +513,7 @@ void UAT_PlayMontageAndWaitForEvent::OnMontageBlendingOut(UAnimMontage* Montage,
 
 			// Reset AnimRootMotionTranslationScale only when native montage root motion was used.
 			ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
-			if (!RootMotionSourceSettings.bEnabled &&
-				Character &&
-				(Character->GetLocalRole() == ROLE_Authority ||
-				(Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted)))
+			if (!MontageMotionSettings.bEnabled && CanApplyLocalMontageMotion(Character, Ability))
 			{
 				Character->SetAnimRootMotionTranslationScale(1.f);
 			}

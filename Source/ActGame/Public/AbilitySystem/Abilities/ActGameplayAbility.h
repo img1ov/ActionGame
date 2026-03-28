@@ -3,7 +3,6 @@
 #pragma once
 
 #include "Abilities/GameplayAbility.h"
-#include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 
 #include "ActGameplayAbility.generated.h"
 
@@ -74,8 +73,6 @@ public:
 
 	/** Stable authored identifier used by combo runtime resolution and Id-based activation. */
 	FName GetAbilityId() const { return AbilityId; }
-
-	const FActMontageRootMotionSourceSettings& GetMontageRootMotionSourceSettings() const { return MontageRootMotionSourceSettings; }
 	
 protected:
 	//~UGameplayAbility interface
@@ -98,7 +95,4 @@ protected:
 	/** Stable authoring Id for runtime lookup and combo follow-up activation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability")
 	FName AbilityId;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Ability Motion")
-	FActMontageRootMotionSourceSettings MontageRootMotionSourceSettings;
 };

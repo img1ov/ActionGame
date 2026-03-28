@@ -3,13 +3,60 @@
 #pragma once
 
 #include "Abilities/Tasks/AbilityTask.h"
-#include "AbilitySystem/Abilities/RootMotion/ActMontageRootMotionSource.h"
 
 #include "AT_PlayMontageAndWaitForEvent.generated.h"
 
 class UActAbilitySystemComponent;
 /** Delegate type used, EventTag and Payload may be empty if it came from the montage callbacks */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPlayMontageAndWaitForEventDelegate, FGameplayTag, EventTag, FGameplayEventData, EventData);
+
+UENUM(BlueprintType)
+enum class EActMontageMotionRangeMode : uint8
+{
+	CurrentSection,
+	ThroughSection,
+	EntireMontage,
+};
+
+/**
+ * Minimal task-side configuration for montage-authored AddMove motion.
+ * This stays local to the montage task instead of increasing ability-side complexity.
+ */
+USTRUCT(BlueprintType)
+struct FActMontageMotionSettings
+{
+	GENERATED_BODY()
+
+	/**
+	 * Enables montage-authored AddMove extraction for this task instance.
+	 * This only applies on machines that actually own and execute this task instance.
+	 * Replicated montage playback by itself will not automatically recreate the task-side AddMove.
+	 * Use this for locally responsive procedural motion. For pure server-authoritative montage motion,
+	 * UE/GAS native root motion remains the simpler path.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion")
+	bool bEnabled = false;
+
+	/** Controls which authored montage range is converted into AddMove motion. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
+	EActMontageMotionRangeMode RangeMode = EActMontageMotionRangeMode::CurrentSection;
+
+	/** Used when RangeMode is ThroughSection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled && RangeMode == EActMontageMotionRangeMode::ThroughSection"))
+	FName EndSectionName = NAME_None;
+
+	/** Applies authored rotation together with extracted translation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
+	bool bApplyRotation = true;
+
+	/** Discards extracted vertical translation so authored montage motion stays planar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
+	bool bIgnoreZAccumulate = true;
+
+	/** Clears locomotion velocity when the first extracted motion segment starts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
+	bool bBrakeMovementOnStart = true;
+};
 
 /**
  * UAT_PlayMontageAndWaitForEvent
@@ -49,7 +96,8 @@ public:
 		float Rate = 1.f,
 		FName StartSection = NAME_None,
 		bool bStopWhenAbilityEnds = true,
-		float AnimRootMotionTranslationScale = 1.f
+		float AnimRootMotionTranslationScale = 1.f,
+		FActMontageMotionSettings MontageMotionSettings = FActMontageMotionSettings()
 	);
 	
 	virtual void Activate() override;
@@ -119,7 +167,7 @@ private:
 	UPROPERTY()
 	FName StartSection;
 
-	/** Modifies how root motion movement to apply */
+	/** Scales native animation root motion when montage motion extraction is disabled. */
 	UPROPERTY()
 	float AnimRootMotionTranslationScale;
 
@@ -128,9 +176,8 @@ private:
 	bool bStopWhenAbilityEnds;
 
 	UPROPERTY()
-	FActMontageRootMotionSourceSettings RootMotionSourceSettings;
+	FActMontageMotionSettings MontageMotionSettings;
 
-	uint16 RootMotionSourceID = 0;
 	int32 AddMoveHandle = INDEX_NONE;
 	bool bPushedDisableRootMotion = false;
 	FName LastAppliedMotionSection = NAME_None;

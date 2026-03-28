@@ -88,6 +88,44 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Act|Input")
 	UE_API bool IsMovementInputBlocked() const;
 
+	/**
+	 * Returns the latest authored move input in input-action space.
+	 *
+	 * Semantics:
+	 * - X = right / left input
+	 * - Y = forward / backward input
+	 *
+	 * This is raw local intent captured at the HeroComponent input-entry layer.
+	 * It is intentionally independent from:
+	 * - actual movement result
+	 * - acceleration / velocity
+	 * - movement-input blocking
+	 *
+	 * That makes it suitable for gameplay/animation code that needs the player's latest
+	 * directional intent even while locomotion is temporarily blocked.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Act|Input")
+	UE_API FVector2D GetMoveInputVector() const { return MoveInputVector; }
+
+	/**
+	 * Converts the latest move input intent into a world-space direction using the owning actor's
+	 * current forward/right basis.
+	 *
+	 * Returns ZeroVector when there is no meaningful move input or the owning pawn is unavailable.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Act|Input")
+	UE_API FVector GetMoveInputDirectionFromActor() const;
+
+	/**
+	 * Converts the latest move input intent into a world-space direction using the controller yaw
+	 * basis that the movement input action uses.
+	 *
+	 * Returns ZeroVector when there is no meaningful move input, the owning pawn is unavailable,
+	 * or no controller is present.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Act|Input")
+	UE_API FVector GetMoveInputDirectionFromController() const;
+
 	/** Returns the active source ref-counts; empty means locomotion input is currently allowed. */
 	const TMap<TWeakObjectPtr<UObject>, int32>& GetMovementInputBlockSources() const { return MovementInputBlockSources; }
 
@@ -118,6 +156,14 @@ protected:
 	 * Input stays blocked until the last matching Pop is received.
 	 */
 	mutable TMap<TWeakObjectPtr<UObject>, int32> MovementInputBlockSources;
+
+	/**
+	 * Latest raw move input captured from the move action.
+	 *
+	 * This stores player intent, not movement result. It is updated on both Triggered and Completed
+	 * input events so callers can safely treat ZeroVector as "no current move input".
+	 */
+	FVector2D MoveInputVector = FVector2D::ZeroVector;
 
 private:
 

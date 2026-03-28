@@ -61,26 +61,50 @@ enum class EActAddMoveSourceType : uint8
  * clears the request once aligned within tolerance.
  */
 UENUM(BlueprintType)
-enum class EActRotationWarpType : uint8
+enum class EActRotationWarpSourceType : uint8
 {
-	/** Match the target actor's facing direction. */
-	Default,
-	/** Match the opposite of the target actor's facing direction. */
-	OppositeDefault,
+	/** Derive desired yaw from a target actor. */
+	Actor,
+	/** Use an authored world-space direction directly. */
+	Direction
+};
+
+/**
+ * Actor-based facing policy for procedural rotation warp.
+ *
+ * Direction-based warp does not need a mode because the desired world direction is already
+ * explicit in the request itself.
+ */
+UENUM(BlueprintType)
+enum class EActRotationWarpActorMode : uint8
+{
+	/** Match the target actor's forward direction. */
+	MatchTargetForward,
+	/** Match the opposite of the target actor's forward direction. */
+	MatchOppositeTargetForward,
 	/** Turn to face the target actor's current location. */
-	Facing,
+	FaceTarget,
 	/** Turn so our back points at the target actor's current location. */
-	OppositeFacing,
+	BackToTarget,
 };
 
 /** Runtime rotation warp request consumed by CharacterMovement. */
 struct FActRotationWarpRequest
 {
-	/** Weak target reference so authored requests fail gracefully when the target is destroyed. */
-	TWeakObjectPtr<AActor> Target;
+	/** Whether the movement component currently has an active warp request. */
+	bool bIsSet = false;
 
-	/** How to derive the desired facing from the target. */
-	EActRotationWarpType RotationType = EActRotationWarpType::Facing;
+	/** Selects whether desired yaw comes from an actor or an explicit world direction. */
+	EActRotationWarpSourceType SourceType = EActRotationWarpSourceType::Actor;
+
+	/** Weak target reference so actor-authored requests fail gracefully when the target is destroyed. */
+	TWeakObjectPtr<AActor> TargetActor;
+
+	/** Actor-specific facing mode used only when SourceType == Actor. */
+	EActRotationWarpActorMode ActorMode = EActRotationWarpActorMode::FaceTarget;
+
+	/** Authored world-space direction used only when SourceType == Direction. */
+	FVector Direction = FVector::ZeroVector;
 
 	/** Constant yaw speed used while rotating toward the desired facing. */
 	float RotationRate = 720.0f;
@@ -152,6 +176,10 @@ struct FActAddMoveParams
 	/** Whether to apply extracted rotation delta (MontageRootMotion only). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	bool bApplyRotation = false;
+
+	/** Whether to discard extracted vertical translation (MontageRootMotion only). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
+	bool bIgnoreZAccumulate = true;
 
 	/**
 	 * Runtime sync identifier used to align predicted AddMove state between

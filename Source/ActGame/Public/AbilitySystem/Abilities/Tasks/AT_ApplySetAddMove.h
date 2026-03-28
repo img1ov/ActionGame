@@ -25,6 +25,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FApplySetAddMoveDelegate);
  * Unlike GAS root motion tasks, the actual movement is executed through
  * UActCharacterMovementComponent::SetAddMove*, so it stays within the project's
  * explicit procedural movement framework.
+ *
+ * Intended use:
+ * - Owner-local responsive movement that should live in the project's predictive movement layer.
+ *
+ * Not the primary path for:
+ * - Pure server-authoritative movement presentation that can rely on UE/GAS native montage/root motion.
  */
 UCLASS()
 class ACTGAME_API UAT_ApplySetAddMove : public UAbilityTask
