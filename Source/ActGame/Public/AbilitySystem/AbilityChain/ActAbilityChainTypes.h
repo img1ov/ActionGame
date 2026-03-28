@@ -84,6 +84,10 @@ public:
 	UPROPERTY()
 	FName SourceAbilityId;
 
+	/** Prediction key of the source ability activation that produced this follow-up request. */
+	UPROPERTY()
+	int16 SourceActivationPredictionKey = 0;
+
 	/** Input command that produced the predicted follow-up. */
 	UPROPERTY()
 	FGameplayTag CommandTag;

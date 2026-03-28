@@ -825,6 +825,12 @@ void UActAbilitySystemComponent::ClientActivateAbilityFailed_Implementation(FGam
 		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
 		GetASCLogTimeSeconds(this));
 
+	if (ShouldPreserveClientAbilityPresentationOnActivationFailure(AbilitySpec))
+	{
+		PreserveClientAbilityPresentationOnActivationFailure(AbilityToActivate, PredictionKey);
+		return;
+	}
+
 	Super::ClientActivateAbilityFailed_Implementation(AbilityToActivate, PredictionKey);
 }
 
@@ -836,6 +842,49 @@ void UActAbilitySystemComponent::ServerAuthorizeAbilityChainActivation_Implement
 bool UActAbilitySystemComponent::ShouldForwardAbilityChainAuthorizationToServer() const
 {
 	return AbilityActorInfo.IsValid() && AbilityActorInfo->IsLocallyControlled() && !AbilityActorInfo->IsNetAuthority();
+}
+
+bool UActAbilitySystemComponent::ShouldPreserveClientAbilityPresentationOnActivationFailure(const FGameplayAbilitySpec* AbilitySpec) const
+{
+	if (!AbilityActorInfo.IsValid() || !AbilityActorInfo->IsLocallyControlled() || AbilityActorInfo->IsNetAuthority())
+	{
+		return false;
+	}
+
+	const UActGameplayAbility* ActAbility = AbilitySpec ? Cast<UActGameplayAbility>(AbilitySpec->Ability) : nullptr;
+	if (!ActAbility)
+	{
+		return false;
+	}
+
+	// Combo abilities carry a stable AbilityId. For these abilities, client presentation smoothness
+	// takes priority over server confirmation because gameplay authority remains on the server.
+	return !ActAbility->GetAbilityId().IsNone();
+}
+
+void UActAbilitySystemComponent::PreserveClientAbilityPresentationOnActivationFailure(
+	const FGameplayAbilitySpecHandle AbilityHandle,
+	const int16 PredictionKey)
+{
+	FGameplayAbilitySpec* AbilitySpec = FindAbilitySpecFromHandle(AbilityHandle);
+	if (!AbilitySpec)
+	{
+		return;
+	}
+
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	if (AbilitySpec->ActivationInfo.GetActivationPredictionKey().Current == PredictionKey)
+	{
+		AbilitySpec->ActivationInfo.SetActivationConfirmed();
+	}
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+
+	UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] Preserve client presentation after server reject. Owner=%s Handle=%s Ability=%s PredictionKey=%d Time=%.3f"),
+		*GetASCActorName(this),
+		*AbilityHandle.ToString(),
+		AbilitySpec->Ability ? *GetAbilityDebugName(AbilitySpec->Ability) : TEXT("None"),
+		PredictionKey,
+		GetASCLogTimeSeconds(this));
 }
 
 void UActAbilitySystemComponent::OnGiveAbility(FGameplayAbilitySpec& AbilitySpec)

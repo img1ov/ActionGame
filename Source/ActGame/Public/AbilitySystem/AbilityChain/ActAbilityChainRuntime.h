@@ -146,11 +146,20 @@ private:
 		/** Source ability that produced the authorization. */
 		FName SourceAbilityId;
 
+		/** Prediction key of the source ability activation that produced the authorization. */
+		int16 SourceActivationPredictionKey = 0;
+
+		/** Command that produced the authorization. Stored for deduplication and diagnostics. */
+		FGameplayTag CommandTag;
+
 		/** Follow-up ability currently allowed to activate. */
 		FName TargetAbilityId;
 
 		/** Spec handle of the source ability that should be canceled after follow-up activation succeeds. */
 		FGameplayAbilitySpecHandle SourceSpecHandle;
+
+		/** Creation time for diagnostics and stable ordering. */
+		double AuthorizedAtSeconds = 0.0;
 
 		/** Expiration time for the authorization gate. */
 		double ExpiresAtSeconds = 0.0;
@@ -158,13 +167,22 @@ private:
 		/** Clears the authorization gate. */
 		void Reset();
 
+		/** True if this authorization has already expired. */
+		bool IsExpired(double CurrentTimeSeconds) const;
+
 		/** True if the specified ability is still authorized to activate. */
-		bool Matches(FName AbilityId, double CurrentTimeSeconds) const;
+		bool MatchesTarget(FName AbilityId, double CurrentTimeSeconds) const;
+
+		/** True if this authorization already represents the same predicted follow-up request. */
+		bool MatchesRequest(const FActAbilityChainActivationRequest& Request, FGameplayAbilitySpecHandle InSourceSpecHandle, double CurrentTimeSeconds) const;
 	};
 
 private:
 	/** Returns the current world time for grace / expiration calculations. */
 	double GetCurrentTimeSeconds(const UActAbilitySystemComponent& ActASC) const;
+
+	/** Returns the prediction key of the currently active combo source ability, if any. */
+	int16 GetActiveContextPredictionKey() const;
 
 	/** True if the cached combo source spec still exists and remains active on the ASC. */
 	bool HasUsableActiveContext(const UActAbilitySystemComponent& ActASC) const;
@@ -187,10 +205,22 @@ private:
 	/** True if the active runtime currently permits the specified command -> ability pair. */
 	bool IsAuthorizedRequest(const FActAbilityChainActivationRequest& Request, double CurrentTimeSeconds) const;
 
+	/** Drops expired follow-up authorizations before making a new runtime decision. */
+	void PruneExpiredPendingActivations(double CurrentTimeSeconds);
+
 	/** Opens the local activation gate and remembers which source ability should be canceled after success. */
 	void GrantPendingActivation(const FActAbilityChainActivationRequest& Request, double CurrentTimeSeconds);
 
-	/** Clears one authorization gate only if it targets the specified ability Id. */
+	/** True if there is at least one unexpired authorization for the specified follow-up ability. */
+	bool HasPendingActivationForAbility(FName AbilityId, double CurrentTimeSeconds) const;
+
+	/** Finds the newest unexpired authorization that can activate the specified follow-up ability. */
+	int32 FindPendingActivationIndexByAbility(FName AbilityId, double CurrentTimeSeconds) const;
+
+	/** Finds an equivalent authorization so repeated weak-network requests refresh instead of stacking. */
+	int32 FindPendingActivationIndexByRequest(const FActAbilityChainActivationRequest& Request, FGameplayAbilitySpecHandle SourceSpecHandle, double CurrentTimeSeconds) const;
+
+	/** Removes one authorization only if it targets the specified follow-up ability. */
 	void ClearPendingActivationIfMatches(FName AbilityId);
 
 	/** Cancels the old source ability after the follow-up ability has started successfully. */
@@ -206,8 +236,8 @@ private:
 	/** Runtime state for each currently known combo window, keyed by stable WindowId. */
 	TMap<FName, FWindowState> WindowStates;
 
-	/** Pending client/server authorization for one follow-up ability activation. */
-	FPendingActivationAuthorization PendingActivation;
+	/** Pending client/server follow-up authorizations kept alive long enough to tolerate weak network jitter. */
+	TArray<FPendingActivationAuthorization> PendingActivations;
 
 	/** Monotonic open sequence used to break same-priority window ties deterministically. */
 	uint64 NextWindowOpenSequence = 0;

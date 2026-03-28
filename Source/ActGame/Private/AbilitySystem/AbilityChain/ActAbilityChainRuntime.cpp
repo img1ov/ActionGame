@@ -7,10 +7,10 @@
 namespace
 {
 	/** Server-side validation grace after a combo window closes. */
-	constexpr double AbilityChainValidationGraceSeconds = 0.20;
+	constexpr double AbilityChainValidationGraceSeconds = 0.35;
 
-	/** Short-lived activation gate for one predicted follow-up ability. */
-	constexpr double AbilityChainAuthorizationLifetimeSeconds = 0.35;
+	/** Short-lived activation gate for predicted follow-ups under weak network conditions. */
+	constexpr double AbilityChainAuthorizationLifetimeSeconds = 0.75;
 }
 
 void FActAbilityChainRuntime::FActiveChainContext::Reset()
@@ -28,20 +28,50 @@ bool FActAbilityChainRuntime::FActiveChainContext::IsValid() const
 void FActAbilityChainRuntime::FPendingActivationAuthorization::Reset()
 {
 	SourceAbilityId = NAME_None;
+	SourceActivationPredictionKey = 0;
+	CommandTag = FGameplayTag();
 	TargetAbilityId = NAME_None;
 	SourceSpecHandle = FGameplayAbilitySpecHandle();
+	AuthorizedAtSeconds = 0.0;
 	ExpiresAtSeconds = 0.0;
 }
 
-bool FActAbilityChainRuntime::FPendingActivationAuthorization::Matches(const FName AbilityId, const double CurrentTimeSeconds) const
+bool FActAbilityChainRuntime::FPendingActivationAuthorization::IsExpired(const double CurrentTimeSeconds) const
 {
-	return !TargetAbilityId.IsNone() && TargetAbilityId == AbilityId && CurrentTimeSeconds <= ExpiresAtSeconds;
+	return CurrentTimeSeconds > ExpiresAtSeconds;
+}
+
+bool FActAbilityChainRuntime::FPendingActivationAuthorization::MatchesTarget(const FName AbilityId, const double CurrentTimeSeconds) const
+{
+	return !TargetAbilityId.IsNone() && TargetAbilityId == AbilityId && !IsExpired(CurrentTimeSeconds);
+}
+
+bool FActAbilityChainRuntime::FPendingActivationAuthorization::MatchesRequest(
+	const FActAbilityChainActivationRequest& Request,
+	const FGameplayAbilitySpecHandle InSourceSpecHandle,
+	const double CurrentTimeSeconds) const
+{
+	if (IsExpired(CurrentTimeSeconds))
+	{
+		return false;
+	}
+
+	const bool bPredictionKeyMatches =
+		SourceActivationPredictionKey == 0 ||
+		Request.SourceActivationPredictionKey == 0 ||
+		SourceActivationPredictionKey == Request.SourceActivationPredictionKey;
+
+	return SourceAbilityId == Request.SourceAbilityId &&
+		CommandTag == Request.CommandTag &&
+		TargetAbilityId == Request.TargetAbilityId &&
+		SourceSpecHandle == InSourceSpecHandle &&
+		bPredictionKeyMatches;
 }
 
 void FActAbilityChainRuntime::Reset()
 {
 	ActiveContext.Reset();
-	PendingActivation.Reset();
+	PendingActivations.Reset();
 	ResetWindowStates();
 	NextWindowOpenSequence = 0;
 }
@@ -156,7 +186,7 @@ bool FActAbilityChainRuntime::CanActivateAbility(const UActAbilitySystemComponen
 	}
 
 	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	if (PendingActivation.Matches(AbilityId, CurrentTimeSeconds))
+	if (HasPendingActivationForAbility(AbilityId, CurrentTimeSeconds))
 	{
 		return true;
 	}
@@ -221,6 +251,7 @@ bool FActAbilityChainRuntime::AuthorizePredictedActivation(UActAbilitySystemComp
 	}
 
 	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
+	PruneExpiredPendingActivations(CurrentTimeSeconds);
 	if (!IsAuthorizedRequest(Request, CurrentTimeSeconds))
 	{
 		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Authorize rejected. Owner=%s SourceAbilityId=%s Command=%s TargetAbilityId=%s Time=%.3f"),
@@ -233,6 +264,14 @@ bool FActAbilityChainRuntime::AuthorizePredictedActivation(UActAbilitySystemComp
 	}
 
 	GrantPendingActivation(Request, CurrentTimeSeconds);
+	UE_LOG(LogActAbilitySystem, Verbose, TEXT("[AbilityChain] Authorize accepted. Owner=%s SourceAbilityId=%s SourcePredKey=%d Command=%s TargetAbilityId=%s PendingCount=%d Time=%.3f"),
+		*GetNameSafe(ActASC.GetAvatarActor()),
+		*Request.SourceAbilityId.ToString(),
+		Request.SourceActivationPredictionKey,
+		*Request.CommandTag.ToString(),
+		*Request.TargetAbilityId.ToString(),
+		PendingActivations.Num(),
+		CurrentTimeSeconds);
 	return true;
 }
 
@@ -245,6 +284,17 @@ double FActAbilityChainRuntime::GetCurrentTimeSeconds(const UActAbilitySystemCom
 {
 	const UWorld* World = ActASC.GetWorld();
 	return World ? World->GetTimeSeconds() : 0.0;
+}
+
+int16 FActAbilityChainRuntime::GetActiveContextPredictionKey() const
+{
+	const UActGameplayAbility* ActiveAbility = ActiveContext.AbilityInstance.Get();
+	if (!ActiveAbility)
+	{
+		return 0;
+	}
+
+	return ActiveAbility->GetCurrentActivationInfo().GetActivationPredictionKey().Current;
 }
 
 bool FActAbilityChainRuntime::HasUsableActiveContext(const UActAbilitySystemComponent& ActASC) const
@@ -349,6 +399,14 @@ bool FActAbilityChainRuntime::IsAuthorizedRequest(const FActAbilityChainActivati
 		return false;
 	}
 
+	const int16 ActiveSourcePredictionKey = GetActiveContextPredictionKey();
+	if (Request.SourceActivationPredictionKey != 0 &&
+		ActiveSourcePredictionKey != 0 &&
+		Request.SourceActivationPredictionKey != ActiveSourcePredictionKey)
+	{
+		return false;
+	}
+
 	TArray<const FWindowState*> CandidateWindows;
 	GatherCandidateWindows(Request.CommandTag, CurrentTimeSeconds, true, CandidateWindows);
 
@@ -376,19 +434,80 @@ bool FActAbilityChainRuntime::IsAuthorizedRequest(const FActAbilityChainActivati
 	return false;
 }
 
+void FActAbilityChainRuntime::PruneExpiredPendingActivations(const double CurrentTimeSeconds)
+{
+	PendingActivations.RemoveAll([CurrentTimeSeconds](const FPendingActivationAuthorization& Authorization)
+	{
+		return Authorization.IsExpired(CurrentTimeSeconds);
+	});
+}
+
 void FActAbilityChainRuntime::GrantPendingActivation(const FActAbilityChainActivationRequest& Request, const double CurrentTimeSeconds)
 {
-	PendingActivation.SourceAbilityId = Request.SourceAbilityId;
-	PendingActivation.TargetAbilityId = Request.TargetAbilityId;
-	PendingActivation.SourceSpecHandle = ActiveContext.SpecHandle;
-	PendingActivation.ExpiresAtSeconds = CurrentTimeSeconds + AbilityChainAuthorizationLifetimeSeconds;
+	const int32 ExistingAuthorizationIndex = FindPendingActivationIndexByRequest(Request, ActiveContext.SpecHandle, CurrentTimeSeconds);
+	if (ExistingAuthorizationIndex != INDEX_NONE)
+	{
+		FPendingActivationAuthorization& ExistingAuthorization = PendingActivations[ExistingAuthorizationIndex];
+		ExistingAuthorization.AuthorizedAtSeconds = CurrentTimeSeconds;
+		ExistingAuthorization.ExpiresAtSeconds = CurrentTimeSeconds + AbilityChainAuthorizationLifetimeSeconds;
+		return;
+	}
+
+	FPendingActivationAuthorization& NewAuthorization = PendingActivations.AddDefaulted_GetRef();
+	NewAuthorization.SourceAbilityId = Request.SourceAbilityId;
+	NewAuthorization.SourceActivationPredictionKey = Request.SourceActivationPredictionKey;
+	NewAuthorization.CommandTag = Request.CommandTag;
+	NewAuthorization.TargetAbilityId = Request.TargetAbilityId;
+	NewAuthorization.SourceSpecHandle = ActiveContext.SpecHandle;
+	NewAuthorization.AuthorizedAtSeconds = CurrentTimeSeconds;
+	NewAuthorization.ExpiresAtSeconds = CurrentTimeSeconds + AbilityChainAuthorizationLifetimeSeconds;
+}
+
+bool FActAbilityChainRuntime::HasPendingActivationForAbility(const FName AbilityId, const double CurrentTimeSeconds) const
+{
+	return FindPendingActivationIndexByAbility(AbilityId, CurrentTimeSeconds) != INDEX_NONE;
+}
+
+int32 FActAbilityChainRuntime::FindPendingActivationIndexByAbility(const FName AbilityId, const double CurrentTimeSeconds) const
+{
+	for (int32 AuthorizationIndex = PendingActivations.Num() - 1; AuthorizationIndex >= 0; --AuthorizationIndex)
+	{
+		const FPendingActivationAuthorization& Authorization = PendingActivations[AuthorizationIndex];
+		if (Authorization.MatchesTarget(AbilityId, CurrentTimeSeconds))
+		{
+			return AuthorizationIndex;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
+int32 FActAbilityChainRuntime::FindPendingActivationIndexByRequest(
+	const FActAbilityChainActivationRequest& Request,
+	const FGameplayAbilitySpecHandle SourceSpecHandle,
+	const double CurrentTimeSeconds) const
+{
+	for (int32 AuthorizationIndex = PendingActivations.Num() - 1; AuthorizationIndex >= 0; --AuthorizationIndex)
+	{
+		const FPendingActivationAuthorization& Authorization = PendingActivations[AuthorizationIndex];
+		if (Authorization.MatchesRequest(Request, SourceSpecHandle, CurrentTimeSeconds))
+		{
+			return AuthorizationIndex;
+		}
+	}
+
+	return INDEX_NONE;
 }
 
 void FActAbilityChainRuntime::ClearPendingActivationIfMatches(const FName AbilityId)
 {
-	if (PendingActivation.TargetAbilityId == AbilityId)
+	for (int32 AuthorizationIndex = PendingActivations.Num() - 1; AuthorizationIndex >= 0; --AuthorizationIndex)
 	{
-		PendingActivation.Reset();
+		if (PendingActivations[AuthorizationIndex].TargetAbilityId == AbilityId)
+		{
+			PendingActivations.RemoveAt(AuthorizationIndex);
+			return;
+		}
 	}
 }
 
@@ -398,13 +517,16 @@ void FActAbilityChainRuntime::CancelPreviousSourceAbilityIfNeeded(
 	const FName NewAbilityId)
 {
 	const double CurrentTimeSeconds = GetCurrentTimeSeconds(ActASC);
-	if (!PendingActivation.Matches(NewAbilityId, CurrentTimeSeconds))
+	PruneExpiredPendingActivations(CurrentTimeSeconds);
+
+	const int32 AuthorizationIndex = FindPendingActivationIndexByAbility(NewAbilityId, CurrentTimeSeconds);
+	if (AuthorizationIndex == INDEX_NONE)
 	{
 		return;
 	}
 
-	const FGameplayAbilitySpecHandle SourceSpecHandle = PendingActivation.SourceSpecHandle;
-	PendingActivation.Reset();
+	const FGameplayAbilitySpecHandle SourceSpecHandle = PendingActivations[AuthorizationIndex].SourceSpecHandle;
+	PendingActivations.RemoveAt(AuthorizationIndex);
 
 	if (!SourceSpecHandle.IsValid() || SourceSpecHandle == NewSpecHandle)
 	{
@@ -427,6 +549,7 @@ bool FActAbilityChainRuntime::TryActivateChainEntry(
 
 	FActAbilityChainActivationRequest Request;
 	Request.SourceAbilityId = ActiveContext.AbilityId;
+	Request.SourceActivationPredictionKey = GetActiveContextPredictionKey();
 	Request.CommandTag = CommandTag;
 	Request.TargetAbilityId = Entry.TargetAbilityId;
 

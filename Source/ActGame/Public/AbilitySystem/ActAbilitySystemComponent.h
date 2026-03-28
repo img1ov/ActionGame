@@ -168,6 +168,12 @@ protected:
 
 	/** Forwards GAS activation failure back into the combo runtime when the failed ability is part of the chain system. */
 	void NotifyAbilityChainActivationFailed(UGameplayAbility* Ability);
+
+	/** True when a rejected predicted activation should keep its local presentation alive. */
+	bool ShouldPreserveClientAbilityPresentationOnActivationFailure(const FGameplayAbilitySpec* AbilitySpec) const;
+
+	/** Keeps the locally predicted combo presentation alive after a server-side activation rejection. */
+	void PreserveClientAbilityPresentationOnActivationFailure(FGameplayAbilitySpecHandle AbilityHandle, int16 PredictionKey);
 	
 protected:
 
