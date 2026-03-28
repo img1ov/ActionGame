@@ -86,6 +86,9 @@ private:
 	/** Returns true when Duration means the move should persist until explicitly stopped. */
 	bool HasInfiniteDuration() const;
 
+	/** Called by the world timer once the finite-duration authored move has reached its end. */
+	void OnTimeFinish();
+
 private:
 	/** Selected coordinate space used to interpret Direction. */
 	UPROPERTY()
@@ -120,4 +123,7 @@ private:
 
 	/** World time when the finite-duration AddMove started. */
 	float StartTimeSeconds = 0.0f;
+
+	/** Timer used to broadcast OnFinish for finite-duration AddMove tasks. */
+	FTimerHandle FinishTimerHandle;
 };

@@ -7,7 +7,9 @@
 #include "Character/ActCharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Curves/CurveFloat.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "TimerManager.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AT_ApplySetAddMove)
 
@@ -47,36 +49,27 @@ void UAT_ApplySetAddMove::Activate()
 		return;
 	}
 
+	if (!HasInfiniteDuration())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (Duration <= 0.0f)
+			{
+				World->GetTimerManager().SetTimerForNextTick(this, &UAT_ApplySetAddMove::OnTimeFinish);
+			}
+			else
+			{
+				World->GetTimerManager().SetTimer(FinishTimerHandle, this, &UAT_ApplySetAddMove::OnTimeFinish, Duration, false);
+			}
+		}
+	}
+
 	SetWaitingOnAvatar();
 }
 
 void UAT_ApplySetAddMove::TickTask(const float DeltaTime)
 {
 	Super::TickTask(DeltaTime);
-
-	if (HasInfiniteDuration())
-	{
-		return;
-	}
-
-	const UWorld* World = GetWorld();
-	if (!World)
-	{
-		EndTask();
-		return;
-	}
-
-	if ((World->GetTimeSeconds() - StartTimeSeconds) < Duration)
-	{
-		return;
-	}
-
-	if (ShouldBroadcastAbilityTaskDelegates())
-	{
-		OnFinish.Broadcast();
-	}
-
-	EndTask();
 }
 
 void UAT_ApplySetAddMove::ExternalCancel()
@@ -87,6 +80,11 @@ void UAT_ApplySetAddMove::ExternalCancel()
 
 void UAT_ApplySetAddMove::OnDestroy(const bool bInOwnerFinished)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FinishTimerHandle);
+	}
+
 	if (AddMoveHandle != INDEX_NONE)
 	{
 		if (UActCharacterMovementComponent* MovementComponent = GetActMovementComponent())
@@ -191,4 +189,14 @@ bool UAT_ApplySetAddMove::ApplyAuthoredAddMove()
 bool UAT_ApplySetAddMove::HasInfiniteDuration() const
 {
 	return Duration < 0.0f;
+}
+
+void UAT_ApplySetAddMove::OnTimeFinish()
+{
+	if (ShouldBroadcastAbilityTaskDelegates())
+	{
+		OnFinish.Broadcast();
+	}
+
+	EndTask();
 }

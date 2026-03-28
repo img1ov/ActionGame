@@ -7,6 +7,7 @@
 #include "Engine/DataTable.h"
 #include "Engine/EngineTypes.h"
 #include "GameplayTagContainer.h"
+#include "Curves/CurveFloat.h"
 #include "UObject/SoftObjectPtr.h"
 #include "UObject/ObjectPtr.h"
 #include "BulletSystemTypes.generated.h"
@@ -135,6 +136,11 @@ struct FHitReactImpulse
     // Primary strength used for scaling / montage selection / convenience (also mirrored into EventData.EventMagnitude).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     float Strength = 0.0f;
+
+    // Optional strength-over-time curve used by the target hit-react ability when converting this impulse
+    // into procedural movement. This scales Strength over normalized time.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    TObjectPtr<UCurveFloat> StrengthCurve = nullptr;
     
 };
 
