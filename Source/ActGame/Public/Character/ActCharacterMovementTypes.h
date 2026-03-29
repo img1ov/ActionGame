@@ -5,15 +5,15 @@
 
 #include "ActCharacterMovementTypes.generated.h"
 
-class UAnimMontage;
 class AActor;
+class UAnimMontage;
 
 /**
- * Coordinate space used by AddMove.
+ * Coordinate space used by translation AddMove.
  *
  * - World: velocity/displacement is already in world space.
- * - Actor: velocity/displacement is in the UpdatedComponent (capsule) space.
- * - Mesh: velocity/displacement is in the mesh component space (useful when mesh has yaw offset).
+ * - Actor: velocity/displacement is authored in capsule space.
+ * - Mesh: velocity/displacement is authored in mesh space.
  */
 UENUM(BlueprintType)
 enum class EActAddMoveSpace : uint8
@@ -24,10 +24,7 @@ enum class EActAddMoveSpace : uint8
 };
 
 /**
- * Scalar profile for explicit velocity-based AddMove.
- *
- * The curve is evaluated with Alpha = Elapsed / Duration and scales the authored velocity.
- * MontageRootMotion moves ignore this and instead sample the animation root motion range.
+ * Scalar profile applied to authored velocity AddMove.
  */
 UENUM(BlueprintType)
 enum class EActAddMoveCurveType : uint8
@@ -40,11 +37,21 @@ enum class EActAddMoveCurveType : uint8
 };
 
 /**
- * Source of an AddMove entry.
- *
- * - Velocity: explicit extra movement (sprint burst, knockback impulse, skill dash, etc).
- * - MontageRootMotion: derived from animation root motion between a start/end track position,
- *   executed by the movement component so it participates in prediction and correction.
+ * Optional movement-mode gate for authored AddMove.
+ * When the current movement mode no longer matches, the AddMove is removed.
+ */
+UENUM(BlueprintType)
+enum class EActAddMoveModeFilter : uint8
+{
+	Any,
+	GroundedOnly,
+	AirOnly,
+	FallingOnly,
+	WalkingOnly,
+};
+
+/**
+ * Source type for translation AddMove.
  */
 UENUM(BlueprintType)
 enum class EActAddMoveSourceType : uint8
@@ -54,138 +61,188 @@ enum class EActAddMoveSourceType : uint8
 };
 
 /**
- * Rotation alignment primitive used by procedural combat movement.
+ * Explicit montage execution mode used by ability tasks.
  *
- * It intentionally mirrors the common authoring intent behind MotionWarping rotation targets while
- * remaining independent from animation root motion. The movement component executes the rotation and
- * clears the request once aligned within tolerance.
+ * - Procedural: montage is presentation only; native root motion is disabled.
+ * - ExtractedRootMotion: montage root motion is extracted into AddMove and executed by CharacterMovement.
+ * - NativeRootMotion: UE native anim root motion remains enabled.
  */
 UENUM(BlueprintType)
-enum class EActRotationWarpSourceType : uint8
+enum class EActMontageExecutionMode : uint8
 {
-	/** Derive desired yaw from a target actor. */
+	Procedural,
+	ExtractedRootMotion,
+	NativeRootMotion,
+};
+
+/**
+ * Source type for rotation AddMove.
+ */
+UENUM(BlueprintType)
+enum class EActAddMoveRotationSourceType : uint8
+{
 	Actor,
-	/** Use an authored world-space direction directly. */
 	Direction
 };
 
 /**
- * Actor-based facing policy for procedural rotation warp.
- *
- * Direction-based warp does not need a mode because the desired world direction is already
- * explicit in the request itself.
+ * Actor-based facing policy for rotation AddMove.
  */
 UENUM(BlueprintType)
-enum class EActRotationWarpActorMode : uint8
+enum class EActAddMoveRotationActorMode : uint8
 {
-	/** Match the target actor's forward direction. */
 	MatchTargetForward,
-	/** Match the opposite of the target actor's forward direction. */
 	MatchOppositeTargetForward,
-	/** Turn to face the target actor's current location. */
 	FaceTarget,
-	/** Turn so our back points at the target actor's current location. */
 	BackToTarget,
 };
 
-/** Runtime rotation warp request consumed by CharacterMovement. */
-struct FActRotationWarpRequest
-{
-	/** Whether the movement component currently has an active warp request. */
-	bool bIsSet = false;
-
-	/** Selects whether desired yaw comes from an actor or an explicit world direction. */
-	EActRotationWarpSourceType SourceType = EActRotationWarpSourceType::Actor;
-
-	/** Weak target reference so actor-authored requests fail gracefully when the target is destroyed. */
-	TWeakObjectPtr<AActor> TargetActor;
-
-	/** Actor-specific facing mode used only when SourceType == Actor. */
-	EActRotationWarpActorMode ActorMode = EActRotationWarpActorMode::FaceTarget;
-
-	/** Authored world-space direction used only when SourceType == Direction. */
-	FVector Direction = FVector::ZeroVector;
-
-	/** Constant yaw speed used while rotating toward the desired facing. */
-	float RotationRate = 720.0f;
-
-	/** Auto-clear threshold once the yaw delta is within tolerance. */
-	float AcceptableYawError = 2.0f;
-
-	/**
-	 * If true, the request is treated as a one-shot alignment task and is cleared as soon as
-	 * the movement component reaches AcceptableYawError.
-	 *
-	 * This should normally stay enabled for attack startup alignment so strafe / lock-on facing
-	 * can take over again immediately after the authored turn-in completes.
-	 */
-	bool bClearOnReached = true;
-};
-
 /**
- * Runtime-authored displacement description consumed by the movement framework.
- * Velocity-based moves are explicit extra movement, while MontageRootMotion
- * samples a section range from animation and turns it into predicted movement.
+ * Runtime-authored translation AddMove description consumed by CharacterMovement.
+ * Velocity-based moves are explicit displacement overlays, while MontageRootMotion
+ * samples an animation range and executes it inside CharacterMovement for prediction.
  */
 USTRUCT(BlueprintType)
 struct FActAddMoveParams
 {
 	GENERATED_BODY()
 
-	/** Selects which fields are active below (velocity vs montage root motion sampling). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove")
 	EActAddMoveSourceType SourceType = EActAddMoveSourceType::Velocity;
 
-	/** Coordinate space for Velocity moves (ignored for MontageRootMotion). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::Velocity"))
 	EActAddMoveSpace Space = EActAddMoveSpace::World;
 
-	/** Authored velocity vector (units/sec) for Velocity moves. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::Velocity"))
 	FVector Velocity = FVector::ZeroVector;
 
 	/**
-	 * Authored duration (seconds).
-	 * - 0: invalid, will be rejected by the movement component.
+	 * Authored duration in seconds.
+	 * - 0: invalid and rejected.
 	 * - > 0: finite duration.
-	 * - < 0: infinite duration (persistent until explicitly stopped).
+	 * - < 0: persistent until explicitly stopped.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (ClampMin = "-1"))
 	float Duration = 0.0f;
 
-	/** Profile type used to scale Velocity over time (ignored for MontageRootMotion). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove")
+	EActAddMoveModeFilter ModeFilter = EActAddMoveModeFilter::Any;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::Velocity"))
 	EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant;
 
-	/** Optional scalar curve for Velocity moves. Alpha is Elapsed/Duration in [0,1]. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::Velocity && CurveType == EActAddMoveCurveType::CustomCurve"))
 	TObjectPtr<UCurveFloat> Curve = nullptr;
 
-	/** Montage whose root motion track will be sampled (MontageRootMotion only). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	TObjectPtr<UAnimMontage> Montage = nullptr;
 
-	/** Track start time (seconds) for root motion sampling (MontageRootMotion only). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	float StartTrackPosition = 0.0f;
 
-	/** Track end time (seconds) for root motion sampling (MontageRootMotion only). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	float EndTrackPosition = 0.0f;
 
-	/** Whether to apply extracted rotation delta (MontageRootMotion only). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	bool bApplyRotation = false;
 
-	/** Whether to discard extracted vertical translation (MontageRootMotion only). */
+	/**
+	 * If true, montage-authored rotation yields to an explicit rotation AddMove when both are active.
+	 * This keeps gameplay-authored facing in control during attack startup / hit react alignment.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
+	bool bRespectAddMoveRotation = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove", meta = (EditCondition = "SourceType == EActAddMoveSourceType::MontageRootMotion"))
 	bool bIgnoreZAccumulate = true;
 
 	/**
-	 * Runtime sync identifier used to align predicted AddMove state between
-	 * client replay, movement RPCs, and server simulation.
-	 * Leave as INDEX_NONE for local-only moves.
+	 * Stable identity for prediction, server simulation, and simulated-proxy bootstrap.
+	 * Leave INDEX_NONE for local-only authored AddMove.
 	 */
-	UPROPERTY(Transient)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove")
 	int32 SyncId = INDEX_NONE;
+};
+
+/**
+ * Runtime-authored rotation AddMove consumed by CharacterMovement.
+ *
+ * Rotation AddMove is the rotation-side twin of translation AddMove:
+ * - lock-on locomotion facing
+ * - attack startup alignment
+ * - hit react "face attacker" alignment
+ */
+USTRUCT(BlueprintType)
+struct FActAddMoveRotationParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation")
+	EActAddMoveRotationSourceType SourceType = EActAddMoveRotationSourceType::Actor;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation", meta = (EditCondition = "SourceType == EActAddMoveRotationSourceType::Actor"))
+	TObjectPtr<AActor> TargetActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation", meta = (EditCondition = "SourceType == EActAddMoveRotationSourceType::Actor"))
+	EActAddMoveRotationActorMode ActorMode = EActAddMoveRotationActorMode::FaceTarget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation", meta = (EditCondition = "SourceType == EActAddMoveRotationSourceType::Direction"))
+	FVector Direction = FVector::ForwardVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation", meta = (ClampMin = "0"))
+	float RotationRate = 720.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation", meta = (ClampMin = "0"))
+	float AcceptableYawError = 2.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation")
+	bool bClearOnReached = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AddMove Rotation")
+	int32 SyncId = INDEX_NONE;
+
+	bool IsValidRequest() const
+	{
+		switch (SourceType)
+		{
+		case EActAddMoveRotationSourceType::Actor:
+			return ::IsValid(TargetActor);
+		case EActAddMoveRotationSourceType::Direction:
+			return !Direction.IsNearlyZero();
+		default:
+			return false;
+		}
+	}
+};
+
+/**
+ * State-driven locomotion parameters.
+ * This is the parameter-side half of the framework; AddMove handles authored extra motion,
+ * while movement state params define how the base locomotion moves/accelerates/turns.
+ */
+USTRUCT(BlueprintType)
+struct FActMovementStateParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	float MaxWalkSpeed = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	float MaxAcceleration = 2048.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	float BrakingDecelerationWalking = 2048.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	float GroundFriction = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	FRotator RotationRate = FRotator(0.0f, 720.0f, 0.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	bool bOrientRotationToMovement = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement State")
+	bool bUseControllerDesiredRotation = false;
 };

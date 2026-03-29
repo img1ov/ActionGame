@@ -10,10 +10,11 @@ bool SerializeAddMoveSnapshot(FArchive& Ar, UPackageMap* PackageMap, FActAddMove
 {
 	(void)PackageMap;
 	// Packed movement moves have a hard bit cap. Static authored parameters are not serialized here;
-	// both sides are expected to have already created the same SyncId-backed AddMove locally.
-	// We only keep elapsed time synchronized.
+	// bootstrap + local task execution create the same SyncId-backed AddMove locally.
+	// Movement RPCs keep runtime state synchronized.
 	Ar << Snapshot.SyncId;
 	Ar << Snapshot.ElapsedTime;
+	Ar.SerializeBits(&Snapshot.bPaused, 1);
 	Snapshot.Params.SyncId = Snapshot.SyncId;
 	return true;
 }

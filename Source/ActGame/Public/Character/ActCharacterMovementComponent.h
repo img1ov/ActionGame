@@ -9,49 +9,44 @@
 #include "ActCharacterMovementComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAccelerationStateChangedSignature, bool, bOldHasAcceleration, bool, bNewHasAcceleration);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGroundStateChangedSignature, bool, bOldIsOnGround, bool, bNewIsOnGround);
 
+class AActor;
 class UAnimMontage;
 class UCurveFloat;
 class USkeletalMeshComponent;
-class AActor;
 
 USTRUCT(BlueprintType)
 struct FActCharacterGroundInfo
 {
 	GENERATED_BODY()
 
-	/** Cached data is invalidated per-frame; we store the last frame number we updated on. */
 	FActCharacterGroundInfo()
 		: LastUpdateFrame(0)
 		, GroundDistance(0.0f)
-	{}
+	{
+	}
 
-	/** Frame counter when this cache was last updated. */
+	/** Frame guard so one movement tick only refreshes ground info once. */
 	uint64 LastUpdateFrame;
 
-	/** Floor hit result (walking uses CurrentFloor; otherwise a trace is performed). */
+	/** Cached floor hit used by Blueprint-side hit / land / ground-distance queries. */
 	UPROPERTY(BlueprintReadOnly)
 	FHitResult GroundHitResult;
 
-	/** Distance from capsule bottom to ground (0 while walking). */
+	/** Capsule-bottom to ground distance in world units. */
 	UPROPERTY(BlueprintReadOnly)
 	float GroundDistance;
 };
 
 /**
- * Project character movement component.
+ * CharacterMovement implementation aligned to the project's AddMove framework.
  *
- * Responsibilities:
- * - Standard UE character movement behavior.
- * - Extra movement overlays ("AddMove"): explicit velocity bursts or animation-derived motion,
- *   executed inside the movement component so it participates in owner-local prediction and correction.
- * - One-shot procedural facing alignment via RotationWarp, again intended for locally controlled motion.
- *
- * Non-responsibilities:
- * - Command matching / combo logic (lives in Input + ASC AbilityChain runtime).
- * - Ability cancellation policy / cancel windows (lives in ASC / ability layer).
- * - Pure server-authoritative movement presentation. If a move does not need owner-local prediction
- *   benefits, prefer UE/GAS native montage root motion or server-authoritative root motion tasks.
+ * Framework split:
+ * - Base locomotion: input + movement state params (speed/acceleration/turning).
+ * - Translation AddMove: explicit extra movement such as launch, knockback, dash.
+ * - Rotation AddMove: explicit extra facing such as lock-on strafe, attack face target, hit react face attacker.
+ * - RootMotion: optional third path. When extracted, it is converted into AddMove and still executed here.
  */
 UCLASS()
 class ACTGAME_API UActCharacterMovementComponent : public UCharacterMovementComponent
@@ -59,194 +54,277 @@ class ACTGAME_API UActCharacterMovementComponent : public UCharacterMovementComp
 	GENERATED_BODY()
 
 public:
-	
-	/** Sets defaults and installs our custom network move data container. */
 	UActCharacterMovementComponent(const FObjectInitializer& ObjectInitializer);
 
-	/**
-	 * Used by AActCharacter replicated acceleration (COND_SimulatedOnly) to drive simulated proxies.
-	 * When bHasReplicatedAcceleration is set, we preserve the replicated acceleration through SimulateMovement.
-	 */
+	/** Replicated simulated-proxy acceleration setter used during movement replay. */
 	void SetReplicatedAcceleration(const FVector& InAcceleration);
-	
-	/**
-	 * Ground info cache accessor.
-	 * Walking uses CurrentFloor; otherwise we trace down to measure ground distance.
-	 */
+
+	/** Returns one-frame cached ground info for Blueprint-side landing / floor queries. */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement")
 	const FActCharacterGroundInfo& GetGroundInfo();
-	
-	/** Convenience accessor used by animation BP to detect acceleration. */
+
 	UFUNCTION(BlueprintCallable, BlueprintPure, meta = (DisplayName = "HasAcceleration"), Category = "Act|CharacterMovement")
-	FORCEINLINE bool GetHasAcceleration () const{ return GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER; }
+	bool GetHasAcceleration() const
+	{
+		return GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER;
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|State")
+	void ApplyMovementStateParams(const FActMovementStateParams& Params);
+
+	/** Restores locomotion parameters back to the defaults captured from CharacterMovement. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|State")
+	void ResetMovementStateParams();
+
+	/** Pushes one locomotion state override; the stack top always owns current locomotion params. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|State")
+	int32 PushMovementStateParams(const FActMovementStateParams& Params, int32 ExistingHandle = -1);
+
+	/** Removes one locomotion state override previously returned by PushMovementStateParams. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|State")
+	bool PopMovementStateParams(int32 Handle);
+
+	/** Clears every locomotion override and falls back to the default locomotion params. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|State")
+	void ClearMovementStateParamsStack();
 
 	/**
-	 * Adds an explicit velocity-based AddMove entry in world space.
-	 *
-	 * @param WorldVelocity Extra velocity vector in world space (units/sec).
-	 * @param Duration Duration seconds; <0 means infinite until stopped.
-	 * @param CurveType Scalar profile applied over time.
-	 * @param Curve Optional curve when CurveType is CustomCurve.
-	 * @param ExistingHandle If not -1, update an existing entry rather than creating a new one.
-	 * @return Handle for stopping/updating the entry, or INDEX_NONE on failure.
+	 * Allocates one runtime SyncId for server-driven or Blueprint-authored AddMove chains.
+	 * Predicted ability tasks should prefer deterministic task-side SyncIds instead.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
-	int32 SetAddMoveWorld(FVector WorldVelocity, float Duration, EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant, UCurveFloat* Curve = nullptr, int32 ExistingHandle = -1);
+	int32 GenerateAddMoveSyncId();
 
-	/** Same as SetAddMoveWorld, but velocity is in UpdatedComponent (capsule) local space. */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
-	int32 SetAddMove(FVector LocalVelocity, float Duration, EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant, UCurveFloat* Curve = nullptr, int32 ExistingHandle = -1);
+	int32 SetAddMoveWorld(
+		FVector WorldVelocity,
+		float Duration,
+		EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant,
+		UCurveFloat* Curve = nullptr,
+		int32 ExistingHandle = -1,
+		int32 SyncId = -1);
 
-	/** Same as SetAddMove, but basis comes from the mesh component (useful when mesh yaw is offset from capsule). */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
-	int32 SetAddMoveWithMesh(USkeletalMeshComponent* Mesh, FVector MeshLocalVelocity, float Duration, EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant, UCurveFloat* Curve = nullptr, int32 ExistingHandle = -1);
+	int32 SetAddMove(
+		FVector LocalVelocity,
+		float Duration,
+		EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant,
+		UCurveFloat* Curve = nullptr,
+		int32 ExistingHandle = -1,
+		int32 SyncId = -1);
 
-	/** Low-level authored AddMove entry point shared by task helpers and internal utilities. */
-	int32 ApplyAddMoveParams(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh = nullptr, int32 ExistingHandle = INDEX_NONE);
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	int32 SetAddMoveWithMesh(
+		USkeletalMeshComponent* Mesh,
+		FVector MeshLocalVelocity,
+		float Duration,
+		EActAddMoveCurveType CurveType = EActAddMoveCurveType::Constant,
+		UCurveFloat* Curve = nullptr,
+		int32 ExistingHandle = -1,
+		int32 SyncId = -1);
 
-	/**
-	 * Adds an animation-derived AddMove by sampling root motion on a montage track range.
-	 *
-	 * The montage itself may be playing for visuals/events, but we disable native montage root motion
-	 * and instead execute the extracted displacement through the movement component so it becomes
-	 * predictable and network-alignable (via SyncId).
-	 */
-	int32 SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation = false, bool bIgnoreZAccumulate = true, int32 ExistingHandle = INDEX_NONE, int32 SyncId = INDEX_NONE);
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	int32 ApplyAddMoveParams(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh = nullptr, int32 ExistingHandle = -1);
 
-	/** Stops one AddMove entry by handle. */
+	/** Converts one authored root-motion range into AddMove so CMC owns execution/prediction instead of AnimRM. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	int32 SetAddMoveFromRootMotionRange(
+		UAnimMontage* Montage,
+		float StartTrackPosition,
+		float EndTrackPosition,
+		float Duration,
+		bool bApplyRotation = false,
+		bool bRespectAddMoveRotation = true,
+		bool bIgnoreZAccumulate = true,
+		int32 ExistingHandle = -1,
+		int32 SyncId = -1);
+
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	bool StopAddMove(int32 Handle);
 
-	/** Stops a mesh-scoped AddMove entry (if one is currently associated with the mesh). */
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	bool StopAddMoveWithMesh(USkeletalMeshComponent* Mesh);
 
-	/** Stops one AddMove entry by stable SyncId. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	bool StopAddMoveBySyncId(int32 SyncId);
 
-	/** Stops and clears all active AddMove entries. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	bool PauseAddMove(int32 Handle);
+
+	/** Decrements the pause lock count for one AddMove; it resumes once the count reaches zero. */
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	bool ResumeAddMove(int32 Handle);
+
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	bool PauseAddMoveBySyncId(int32 SyncId);
+
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
+	bool ResumeAddMoveBySyncId(int32 SyncId);
+
 	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove")
 	void StopAllAddMove();
 
-	/** True if any AddMove entries are active. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|CharacterMovement|AddMove")
 	bool HasActiveAddMove() const;
 
-	/**
-	 * Submit or refresh a one-shot rotation warp toward a target actor.
-	 *
-	 * Repeated calls overwrite the current request. This is intended for local/predicted combat
-	 * movement where authored facing alignment should happen inside the movement framework rather
-	 * than through server-authoritative montage/root-motion behavior.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
-	void WarpRotationToActor(AActor* Target, EActRotationWarpActorMode ActorMode, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|CharacterMovement|AddMove")
+	bool HasAddMoveBySyncId(int32 SyncId) const;
 
-	/**
-	 * Submit or refresh a one-shot rotation warp toward an explicit world-space direction.
-	 *
-	 * Use this when gameplay already knows the desired facing basis, for example acceleration,
-	 * velocity, input intent, or an authored aim direction.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
-	void WarpRotationToDirection(FVector WorldDirection, float InRotationRate = 720.0f, float InAcceptableYawError = 2.0f, bool bClearOnReached = true);
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove Rotation")
+	void SetAddMoveRotationToActor(
+		AActor* Target,
+		EActAddMoveRotationActorMode ActorMode,
+		float InRotationRate = 720.0f,
+		float AcceptableYawError = 2.0f,
+		bool bClearOnReached = true,
+		int32 SyncId = -1);
 
-	/** Explicitly clears the current rotation warp request. */
-	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|RotationWarp")
-	void ClearRotationWarp();
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove Rotation")
+	void SetAddMoveRotationToDirection(
+		FVector WorldDirection,
+		float InRotationRate = 720.0f,
+		float AcceptableYawError = 2.0f,
+		bool bClearOnReached = true,
+		int32 SyncId = -1);
 
-	/** C++ accessor used by abilities/notifies to inspect the current warp request, if any. */
-	const FActRotationWarpRequest* GetRotationWarpRequest() const;
+	UFUNCTION(BlueprintCallable, Category = "Act|CharacterMovement|AddMove Rotation")
+	void ClearAddMoveRotation();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|CharacterMovement|AddMove Rotation")
+	bool HasActiveAddMoveRotation() const;
+
+	/** Active explicit facing request currently overriding default locomotion yaw. */
+	const FActAddMoveRotationParams* GetAddMoveRotationParams() const;
+
+	/** Simulated-proxy bootstrap helpers driven from AActCharacter multicast RPCs. */
+	void ApplyReplicatedAddMove(const FActAddMoveParams& Params);
+	void StopReplicatedAddMove(int32 SyncId);
+	void PauseReplicatedAddMove(int32 SyncId);
+	void ResumeReplicatedAddMove(int32 SyncId);
+	void ApplyReplicatedAddMoveRotation(const FActAddMoveRotationParams& Params);
+	void ClearReplicatedAddMoveRotation();
 
 protected:
-	
-	/** ~UCharacterMovementComponent Interface */
-	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
+	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual void MoveAutonomous(float ClientTimeStamp, float DeltaTime, uint8 CompressedFlags, const FVector& NewAccel) override;
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
 	virtual void SimulateMovement(float DeltaTime) override;
 	virtual bool CanAttemptJump() const override;
 	virtual void PhysicsRotation(float DeltaTime) override;
-	/** ~End UCharacterMovementComponent Interface */
 
 private:
-	struct FActVelocityAdditionState;
+	struct FActAddMoveState;
 
-	/** Applies a one-shot rotation warp request before lock-on/default rotation logic. */
-	bool TryApplyRotationWarp(float DeltaTime);
+	/** Applies explicit rotation AddMove before any lock-on/default locomotion rotation. */
+	bool TryApplyAddMoveRotation(float DeltaTime);
+	/** Lock-on strafe facing fallback used only when no explicit rotation AddMove owns yaw. */
 	bool TryApplyStrafeRotation(float DeltaTime);
-	int32 SetAddMoveInternal(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle);
+	int32 SetAddMoveInternal(FActAddMoveParams Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle, bool bBroadcastToSimulatedProxies);
+	bool StopAddMoveInternal(int32 Handle, bool bBroadcastToSimulatedProxies);
+	bool PauseAddMoveInternal(int32 Handle);
+	bool ResumeAddMoveInternal(int32 Handle);
+	/** Consumes one frame of translation/rotation contributed by every active AddMove entry. */
 	FVector ConsumeAddMoveDisplacement(float DeltaSeconds, FQuat& OutRotationDelta);
 	float EvaluateAddMoveScale(const FActAddMoveParams& Params, float ElapsedTime, float Duration) const;
-	FVector ResolveAddMoveDisplacement(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, float PreviousElapsedTime, float NewElapsedTime, float DeltaSeconds, bool& bOutHasRotationDelta, FQuat& OutRotationDelta) const;
+	bool DoesAddMovePassModeFilter(const FActAddMoveParams& Params) const;
+	FVector ResolveAddMoveDisplacement(
+		const FActAddMoveParams& Params,
+		USkeletalMeshComponent* Mesh,
+		float PreviousElapsedTime,
+		float NewElapsedTime,
+		float DeltaSeconds,
+		bool& bOutHasRotationDelta,
+		FQuat& OutRotationDelta) const;
 	FTransform GetAddMoveBasisTransform(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh) const;
 	int32 AcquireAddMoveHandle(int32 ExistingHandle, int32 SyncId);
+	/** Executes the frame-accumulated AddMove delta after base CharacterMovement has updated. */
 	void ApplyPendingAddMove(float DeltaSeconds);
-	void RemoveAddMoveMappings(int32 Handle, const FActVelocityAdditionState* State);
+	void RemoveAddMoveMappings(int32 Handle, const FActAddMoveState* State);
 	void RemoveAddMoves(const TArray<int32>& Handles);
 	void CaptureAddMoveSnapshots(TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& OutSnapshots) const;
 	void RestoreAddMoveSnapshots(const TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& Snapshots, bool bNetworkSynchronizedOnly);
 	uint32 GetAddMoveStateRevision() const { return AddMoveStateRevision; }
+	void UpdateAddMoveNetworkCorrectionMode();
+	void SetAddMoveRotationInternal(const FActAddMoveRotationParams& Params, bool bBroadcastToSimulatedProxies);
+	void ClearAddMoveRotationInternal(bool bBroadcastToSimulatedProxies);
+	/** Re-applies the top-most locomotion state after any stack mutation. */
+	void RefreshMovementStateParamsFromStack();
 
-	struct FActVelocityAdditionState
+	struct FActAddMoveState
 	{
+		/** Local-only runtime handle; never leaves this machine. */
 		int32 Handle = INDEX_NONE;
+		/** Authored AddMove definition. */
 		FActAddMoveParams Params;
+		/** Optional mesh basis for mesh-space AddMove. */
 		TWeakObjectPtr<USkeletalMeshComponent> Mesh;
+		/** Time already consumed inside this AddMove. */
 		float ElapsedTime = 0.0f;
+		/** Reference-counted pause lock used by gameplay and replication. */
+		int32 PauseLockCount = 0;
+	};
+
+	struct FActMovementStateStackEntry
+	{
+		/** Local stack handle returned to Blueprint/gameplay code. */
+		int32 Handle = INDEX_NONE;
+		/** Authored locomotion parameter override. */
+		FActMovementStateParams Params;
 	};
 
 	friend struct FActCharacterNetworkMoveData;
 	friend class FActSavedMove_Character;
 
-	
 public:
-	
-	UPROPERTY(BlueprintAssignable, Category="Act|CharacterMovement")
+	/** Broadcast when 2D acceleration presence toggles. */
+	UPROPERTY(BlueprintAssignable, Category = "Act|CharacterMovement")
 	FOnAccelerationStateChangedSignature OnAccelerationStateChanged;
-	
+
+	/** Broadcast when grounded state toggles; intended for Blueprint-side hit/launch state transitions. */
+	UPROPERTY(BlueprintAssignable, Category = "Act|CharacterMovement")
+	FOnGroundStateChangedSignature OnGroundStateChanged;
+
 protected:
-	
+	/** Cached ground trace/floor result reused during one movement tick. */
 	FActCharacterGroundInfo CachedGroundInfo;
 
 	UPROPERTY(Transient)
 	bool bHasReplicatedAcceleration = false;
-	
-	bool bHasAcceleration = false;
 
-	/** Active AddMove entries by handle. */
-	TMap<int32, FActVelocityAdditionState> VelocityAdditionMap;
-	/** Mesh -> handle mapping for mesh-scoped entries. */
-	TMap<TObjectPtr<USkeletalMeshComponent>, int32> VelocityAdditionMapByMesh;
-	/** Next local handle (only meaningful on this machine). */
+	bool bHasAcceleration = false;
+	bool bIsOnGround = false;
+
+	/** Active translation AddMove states keyed by local handle. */
+	TMap<int32, FActAddMoveState> AddMoveStateMap;
+	/** Mesh-scoped AddMove lookup. */
+	TMap<TObjectPtr<USkeletalMeshComponent>, int32> AddMoveStateMapByMesh;
+	/** SyncId-scoped AddMove lookup used by prediction and simulated-proxy bootstrap. */
+	TMap<int32, int32> AddMoveStateMapBySyncId;
 	int32 NextAddMoveHandle = 1;
-	/** Re-entrancy guard while we apply displacement into UpdatedComponent. */
+	int32 NextGeneratedAddMoveSyncId = 1;
+	int32 NextMovementStateHandle = 1;
+
+	/** Guards against AddMove recursively re-entering movement while it is being applied. */
 	bool bApplyingAddMove = false;
-	/** Pending displacement computed in ConsumeAddMoveDisplacement and applied in OnMovementUpdated. */
+	/** One-frame pending translation delta computed after AddMove consumption. */
 	FVector PendingAddMoveDisplacement = FVector::ZeroVector;
-	/** Pending rotation delta (only used when bApplyRotation on montage-derived entries). */
+	/** One-frame pending rotation delta produced by montage-derived AddMove rotation. */
 	FQuat PendingAddMoveRotationDelta = FQuat::Identity;
 
-	/**
-	 * When AddMove is active, we temporarily relax server correction to reduce jitter under bad network.
-	 * This is restored when the last AddMove ends.
-	 */
+	/** While AddMove is active, owner/server correction is relaxed to reduce jitter under poor network. */
 	bool bAddMoveNetworkCorrectionOverrideActive = false;
 	bool bCachedIgnoreClientMovementErrorChecksAndCorrection = false;
 	bool bCachedServerAcceptClientAuthoritativePosition = false;
-
-	/** Increments every time AddMove state meaningfully changes; used to gate SavedMove combining. */
+	/** SavedMove combine gate; any meaningful AddMove state change bumps this revision. */
 	uint32 AddMoveStateRevision = 0;
 
-	/** SyncId -> handle mapping for network-stable entries (section refresh uses this to "update" not "add"). */
-	TMap<int32, int32> VelocityAdditionMapBySyncId;
+	/** Explicit facing request currently owned by gameplay. */
+	FActAddMoveRotationParams AddMoveRotationParams;
+	/** Locomotion defaults captured from base CharacterMovement setup. */
+	FActMovementStateParams DefaultMovementStateParams;
+	/** Top-most entry owns locomotion params; used by sprint/strafe/attack state changes. */
+	TArray<FActMovementStateStackEntry> MovementStateStack;
 
-	/** Current one-shot rotation warp request; cleared once aligned or when the source becomes invalid. */
-	FActRotationWarpRequest RotationWarpRequest;
-
-	/** Custom network move data payload container (New/Pending/Old) used by CMC RPC packing. */
+	/** Custom move payload container used to pack AddMove state through CMC RPCs. */
 	mutable FActCharacterNetworkMoveDataContainer NetworkMoveDataContainer;
-
-	/** Enables/disables network correction relax mode depending on whether AddMove is active. */
-	void UpdateAddMoveNetworkCorrectionMode();
 };

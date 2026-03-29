@@ -301,10 +301,10 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 			if (!World->IsNetMode(NM_Client))
 			{
 				FHitReactImpulse HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
-				if (HitReactImpulse.HitReactTag.IsValid())
+				if (HitReactImpulse.Tag.IsValid())
 				{
-					HitReactImpulse.ImpulseVector = BuildHitReactImpulseFromAttackerSpace(
-						HitReactImpulse.ImpulseVector,
+					HitReactImpulse.Direction = BuildHitReactImpulseFromAttackerSpace(
+						HitReactImpulse.Direction,
 						SourceActor,
 						TargetActor,
 						TargetHit);
@@ -315,7 +315,7 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 					TargetData.Add(HitReactTargetData);
 
 					FGameplayEventData EventData;
-					EventData.EventTag = HitReactImpulse.HitReactTag;
+					EventData.EventTag = HitReactImpulse.Tag;
 					EventData.Instigator = SourceActor;
 					EventData.Target = TargetActor;
 					EventData.TargetData = TargetData;

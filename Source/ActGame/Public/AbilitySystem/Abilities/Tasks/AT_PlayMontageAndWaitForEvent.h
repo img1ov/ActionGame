@@ -10,60 +10,12 @@ class UActAbilitySystemComponent;
 /** Delegate type used, EventTag and Payload may be empty if it came from the montage callbacks */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPlayMontageAndWaitForEventDelegate, FGameplayTag, EventTag, FGameplayEventData, EventData);
 
-UENUM(BlueprintType)
-enum class EActMontageMotionRangeMode : uint8
-{
-	CurrentSection,
-	ThroughSection,
-	EntireMontage,
-};
-
 /**
- * Minimal task-side configuration for montage-authored AddMove motion.
- * This stays local to the montage task instead of increasing ability-side complexity.
- */
-USTRUCT(BlueprintType)
-struct FActMontageMotionSettings
-{
-	GENERATED_BODY()
-
-	/**
-	 * Enables montage-authored AddMove extraction for this task instance.
-	 * This only applies on machines that actually own and execute this task instance.
-	 * Replicated montage playback by itself will not automatically recreate the task-side AddMove.
-	 * Use this for locally responsive procedural motion. For pure server-authoritative montage motion,
-	 * UE/GAS native root motion remains the simpler path.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion")
-	bool bEnabled = false;
-
-	/** Controls which authored montage range is converted into AddMove motion. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
-	EActMontageMotionRangeMode RangeMode = EActMontageMotionRangeMode::CurrentSection;
-
-	/** Used when RangeMode is ThroughSection. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled && RangeMode == EActMontageMotionRangeMode::ThroughSection"))
-	FName EndSectionName = NAME_None;
-
-	/** Applies authored rotation together with extracted translation. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
-	bool bApplyRotation = true;
-
-	/** Discards extracted vertical translation so authored montage motion stays planar. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
-	bool bIgnoreZAccumulate = true;
-
-	/** Clears locomotion velocity when the first extracted motion segment starts. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage Motion", meta = (EditCondition = "bEnabled"))
-	bool bBrakeMovementOnStart = true;
-};
-
-/**
- * UAT_PlayMontageAndWaitForEvent
- * This task combines PlayMontageAndWait and WaitForEvent into one task, so you can wait for multiple types of activations such as from a melee combo
- * Much of this code is copied from one of those two ability tasks
- * This is a good task to look at as an example when creating game-specific tasks
- * It is expected that each game will have a set of game-specific tasks to do what they want
+ * Default montage + gameplay-event task.
+ *
+ * Primary use:
+ * - montage is only presentation / notify container
+ * - gameplay displacement is handled elsewhere through ApplyAddMove or other movement code
  */
 UCLASS()
 class ACTGAME_API UAT_PlayMontageAndWaitForEvent : public UAbilityTask
@@ -96,12 +48,10 @@ public:
 		float Rate = 1.f,
 		FName StartSection = NAME_None,
 		bool bStopWhenAbilityEnds = true,
-		float AnimRootMotionTranslationScale = 1.f,
-		FActMontageMotionSettings MontageMotionSettings = FActMontageMotionSettings()
+		float AnimRootMotionTranslationScale = 1.f
 	);
 	
 	virtual void Activate() override;
-	virtual void TickTask(float DeltaTime) override;
 	virtual void ExternalCancel() override;
 	virtual FString GetDebugString() const override;
 	virtual void OnDestroy(bool bInOwnerFinished) override;
@@ -110,9 +60,6 @@ private:
 
 	/** Checks if the ability is playing a montage and stops that montage, returns true if a montage was stopped, false if not. */
 	bool StopPlayingMontage();
-	bool RefreshPredictedMotionForSection(const FName SectionName);
-	FName GetCurrentMontageSectionName() const;
-	int32 GetOrCreateMotionSyncId() const;
 
 	/** Returns our ability system component */
 	UActAbilitySystemComponent* GetActAbilitySystemComponent();
@@ -122,8 +69,10 @@ private:
 	void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	void OnGameplayEvent(FGameplayTag EventTag, const FGameplayEventData* Payload);
 
+	/** Bound to AnimInstance so task delegates mirror montage lifecycle. */
 	FOnMontageBlendingOutStarted BlendingOutDelegate;
 	FOnMontageEnded MontageEndedDelegate;
+	/** Handles removal of ability-cancel and gameplay-event callbacks on task destroy. */
 	FDelegateHandle CancelledHandle;
 	FDelegateHandle EventHandle;
 
@@ -175,12 +124,4 @@ private:
 	UPROPERTY()
 	bool bStopWhenAbilityEnds;
 
-	UPROPERTY()
-	FActMontageMotionSettings MontageMotionSettings;
-
-	int32 AddMoveHandle = INDEX_NONE;
-	bool bPushedDisableRootMotion = false;
-	FName LastAppliedMotionSection = NAME_None;
-	mutable int32 MotionSyncId = INDEX_NONE;
-	
 };

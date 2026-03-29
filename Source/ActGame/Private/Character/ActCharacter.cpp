@@ -308,6 +308,84 @@ void AActCharacter::FastSharedReplication_Implementation(const FSharedRepMovemen
 	}
 }
 
+void AActCharacter::MulticastBootstrapAddMove_Implementation(const FActAddMoveParams& Params)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->ApplyReplicatedAddMove(Params);
+	}
+}
+
+void AActCharacter::MulticastStopAddMove_Implementation(const int32 SyncId)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->StopReplicatedAddMove(SyncId);
+	}
+}
+
+void AActCharacter::MulticastPauseAddMove_Implementation(const int32 SyncId)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->PauseReplicatedAddMove(SyncId);
+	}
+}
+
+void AActCharacter::MulticastResumeAddMove_Implementation(const int32 SyncId)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->ResumeReplicatedAddMove(SyncId);
+	}
+}
+
+void AActCharacter::MulticastSetAddMoveRotation_Implementation(const FActAddMoveRotationParams& Params)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->ApplyReplicatedAddMoveRotation(Params);
+	}
+}
+
+void AActCharacter::MulticastClearAddMoveRotation_Implementation()
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
+	{
+		ActMovementComponent->ClearReplicatedAddMoveRotation();
+	}
+}
+
 bool AActCharacter::UpdateSharedReplication()
 {
 	if (GetLocalRole() == ROLE_Authority)

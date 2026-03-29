@@ -1,6 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "AbilitySystem/Abilities/Tasks/AT_ApplySetAddMove.h"
+#include "AbilitySystem/Abilities/Tasks/AT_ApplyAddMove.h"
 
 #include "AbilitySystemGlobals.h"
 #include "ActLogChannels.h"
@@ -9,17 +9,17 @@
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "Misc/Crc.h"
 #include "TimerManager.h"
 
-#include UE_INLINE_GENERATED_CPP_BY_NAME(AT_ApplySetAddMove)
+#include UE_INLINE_GENERATED_CPP_BY_NAME(AT_ApplyAddMove)
 
-UAT_ApplySetAddMove::UAT_ApplySetAddMove(const FObjectInitializer& ObjectInitializer)
+UAT_ApplyAddMove::UAT_ApplyAddMove(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	bTickingTask = true;
 }
 
-UAT_ApplySetAddMove* UAT_ApplySetAddMove::ApplySetAddMove(
+UAT_ApplyAddMove* UAT_ApplyAddMove::ApplyAddMove(
 	UGameplayAbility* OwningAbility,
 	const FName TaskInstanceName,
 	const EActAddMoveSpace InSpace,
@@ -31,7 +31,7 @@ UAT_ApplySetAddMove* UAT_ApplySetAddMove::ApplySetAddMove(
 {
 	UAbilitySystemGlobals::NonShipping_ApplyGlobalAbilityScaler_Duration(InDuration);
 
-	UAT_ApplySetAddMove* Task = NewAbilityTask<UAT_ApplySetAddMove>(OwningAbility, TaskInstanceName);
+	UAT_ApplyAddMove* Task = NewAbilityTask<UAT_ApplyAddMove>(OwningAbility, TaskInstanceName);
 	Task->Space = InSpace;
 	Task->Direction = InDirection.GetSafeNormal();
 	Task->Strength = InStrength;
@@ -41,7 +41,7 @@ UAT_ApplySetAddMove* UAT_ApplySetAddMove::ApplySetAddMove(
 	return Task;
 }
 
-void UAT_ApplySetAddMove::Activate()
+void UAT_ApplyAddMove::Activate()
 {
 	if (!ApplyAuthoredAddMove())
 	{
@@ -55,11 +55,11 @@ void UAT_ApplySetAddMove::Activate()
 		{
 			if (Duration <= 0.0f)
 			{
-				World->GetTimerManager().SetTimerForNextTick(this, &UAT_ApplySetAddMove::OnTimeFinish);
+				World->GetTimerManager().SetTimerForNextTick(this, &UAT_ApplyAddMove::OnTimeFinish);
 			}
 			else
 			{
-				World->GetTimerManager().SetTimer(FinishTimerHandle, this, &UAT_ApplySetAddMove::OnTimeFinish, Duration, false);
+				World->GetTimerManager().SetTimer(FinishTimerHandle, this, &UAT_ApplyAddMove::OnTimeFinish, Duration, false);
 			}
 		}
 	}
@@ -67,18 +67,13 @@ void UAT_ApplySetAddMove::Activate()
 	SetWaitingOnAvatar();
 }
 
-void UAT_ApplySetAddMove::TickTask(const float DeltaTime)
-{
-	Super::TickTask(DeltaTime);
-}
-
-void UAT_ApplySetAddMove::ExternalCancel()
+void UAT_ApplyAddMove::ExternalCancel()
 {
 	Super::ExternalCancel();
 	EndTask();
 }
 
-void UAT_ApplySetAddMove::OnDestroy(const bool bInOwnerFinished)
+void UAT_ApplyAddMove::OnDestroy(const bool bInOwnerFinished)
 {
 	if (UWorld* World = GetWorld())
 	{
@@ -98,10 +93,10 @@ void UAT_ApplySetAddMove::OnDestroy(const bool bInOwnerFinished)
 	Super::OnDestroy(bInOwnerFinished);
 }
 
-FString UAT_ApplySetAddMove::GetDebugString() const
+FString UAT_ApplyAddMove::GetDebugString() const
 {
 	return FString::Printf(
-		TEXT("ApplySetAddMove. Space=%d Direction=%s Strength=%.2f Duration=%.2f Handle=%d"),
+		TEXT("ApplyAddMove. Space=%d Direction=%s Strength=%.2f Duration=%.2f Handle=%d"),
 		static_cast<int32>(Space),
 		*Direction.ToString(),
 		Strength,
@@ -109,13 +104,13 @@ FString UAT_ApplySetAddMove::GetDebugString() const
 		AddMoveHandle);
 }
 
-UActCharacterMovementComponent* UAT_ApplySetAddMove::GetActMovementComponent() const
+UActCharacterMovementComponent* UAT_ApplyAddMove::GetActMovementComponent() const
 {
 	const ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
 	return Character ? Cast<UActCharacterMovementComponent>(Character->GetCharacterMovement()) : nullptr;
 }
 
-USkeletalMeshComponent* UAT_ApplySetAddMove::ResolveMeshBasis() const
+USkeletalMeshComponent* UAT_ApplyAddMove::ResolveMeshBasis() const
 {
 	if (Mesh)
 	{
@@ -126,12 +121,12 @@ USkeletalMeshComponent* UAT_ApplySetAddMove::ResolveMeshBasis() const
 	return Character ? Character->GetMesh() : nullptr;
 }
 
-bool UAT_ApplySetAddMove::ApplyAuthoredAddMove()
+bool UAT_ApplyAddMove::ApplyAuthoredAddMove()
 {
 	UActCharacterMovementComponent* MovementComponent = GetActMovementComponent();
 	if (!MovementComponent)
 	{
-		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplySetAddMove called in Ability %s with null ActCharacterMovementComponent; Task Instance Name %s."),
+		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplyAddMove called in Ability %s with null ActCharacterMovementComponent; Task Instance Name %s."),
 			Ability ? *Ability->GetName() : TEXT("NULL"),
 			*InstanceName.ToString());
 		return false;
@@ -139,7 +134,7 @@ bool UAT_ApplySetAddMove::ApplyAuthoredAddMove()
 
 	if (Direction.IsNearlyZero() || FMath::IsNearlyZero(Strength) || FMath::IsNearlyZero(Duration))
 	{
-		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplySetAddMove called in Ability %s with invalid movement params. Direction=%s Strength=%.3f Duration=%.3f Task Instance Name %s."),
+		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplyAddMove called in Ability %s with invalid movement params. Direction=%s Strength=%.3f Duration=%.3f Task Instance Name %s."),
 			Ability ? *Ability->GetName() : TEXT("NULL"),
 			*Direction.ToString(),
 			Strength,
@@ -150,21 +145,19 @@ bool UAT_ApplySetAddMove::ApplyAuthoredAddMove()
 
 	const FVector Velocity = Direction * Strength;
 	const EActAddMoveCurveType CurveType = StrengthOverTime ? EActAddMoveCurveType::CustomCurve : EActAddMoveCurveType::Constant;
+	const int32 SyncId = ShouldUseNetworkSyncId() ? GetOrCreateAddMoveSyncId() : INDEX_NONE;
 
 	switch (Space)
 	{
 	case EActAddMoveSpace::World:
-		AddMoveHandle = MovementComponent->SetAddMoveWorld(Velocity, Duration, CurveType, StrengthOverTime);
+		AddMoveHandle = MovementComponent->SetAddMoveWorld(Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
 		break;
-
 	case EActAddMoveSpace::Actor:
-		AddMoveHandle = MovementComponent->SetAddMove(Velocity, Duration, CurveType, StrengthOverTime);
+		AddMoveHandle = MovementComponent->SetAddMove(Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
 		break;
-
 	case EActAddMoveSpace::Mesh:
-		AddMoveHandle = MovementComponent->SetAddMoveWithMesh(ResolveMeshBasis(), Velocity, Duration, CurveType, StrengthOverTime);
+		AddMoveHandle = MovementComponent->SetAddMoveWithMesh(ResolveMeshBasis(), Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
 		break;
-
 	default:
 		AddMoveHandle = INDEX_NONE;
 		break;
@@ -172,26 +165,21 @@ bool UAT_ApplySetAddMove::ApplyAuthoredAddMove()
 
 	if (AddMoveHandle == INDEX_NONE)
 	{
-		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplySetAddMove failed to allocate AddMove handle. Ability=%s Task Instance Name %s."),
+		UE_LOG(LogActAbilitySystem, Warning, TEXT("UAT_ApplyAddMove failed to allocate movement handle. Ability=%s Task Instance Name %s."),
 			Ability ? *Ability->GetName() : TEXT("NULL"),
 			*InstanceName.ToString());
 		return false;
 	}
 
-	if (const UWorld* World = GetWorld())
-	{
-		StartTimeSeconds = World->GetTimeSeconds();
-	}
-
 	return true;
 }
 
-bool UAT_ApplySetAddMove::HasInfiniteDuration() const
+bool UAT_ApplyAddMove::HasInfiniteDuration() const
 {
 	return Duration < 0.0f;
 }
 
-void UAT_ApplySetAddMove::OnTimeFinish()
+void UAT_ApplyAddMove::OnTimeFinish()
 {
 	if (ShouldBroadcastAbilityTaskDelegates())
 	{
@@ -199,4 +187,38 @@ void UAT_ApplySetAddMove::OnTimeFinish()
 	}
 
 	EndTask();
+}
+
+bool UAT_ApplyAddMove::ShouldUseNetworkSyncId() const
+{
+	if (!Ability)
+	{
+		return false;
+	}
+
+	return Ability->GetNetExecutionPolicy() != EGameplayAbilityNetExecutionPolicy::LocalOnly;
+}
+
+int32 UAT_ApplyAddMove::GetOrCreateAddMoveSyncId() const
+{
+	if (AddMoveSyncId != INDEX_NONE)
+	{
+		return AddMoveSyncId;
+	}
+
+	uint32 Hash = GetTypeHash(InstanceName);
+	if (Ability)
+	{
+		Hash = HashCombine(Hash, GetTypeHash(Ability->GetClass()));
+		Hash = HashCombine(Hash, FCrc::StrCrc32(*Ability->GetCurrentAbilitySpecHandle().ToString()));
+		Hash = HashCombine(Hash, ::GetTypeHash(Ability->GetCurrentActivationInfo().GetActivationPredictionKey().Current));
+	}
+
+	AddMoveSyncId = static_cast<int32>(Hash & 0x7fffffff);
+	if (AddMoveSyncId == INDEX_NONE)
+	{
+		AddMoveSyncId = FCrc::StrCrc32(TEXT("ApplyAddMoveSync"));
+	}
+
+	return AddMoveSyncId;
 }

@@ -1,31 +1,168 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+
 #include "Character/ActCharacterMovementComponent.h"
 
+#include "ActLogChannels.h"
 #include "Animation/AnimMontage.h"
+#include "Character/ActBattleComponent.h"
+#include "Character/ActCharacter.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameplayTagAssetInterface.h"
-#include "Character/ActBattleComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 
 namespace ActCharacter
 {
 	static float GroundTraceDistance = 100000.0f;
-};
+}
 
 UActCharacterMovementComponent::UActCharacterMovementComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	bCachedIgnoreClientMovementErrorChecksAndCorrection = bIgnoreClientMovementErrorChecksAndCorrection;
 	bCachedServerAcceptClientAuthoritativePosition = bServerAcceptClientAuthoritativePosition;
+	bIsOnGround = IsMovingOnGround();
 
-	// Install our custom move data container so AddMove snapshots are serialized through CMC RPCs.
-	// This is the core that allows the server to simulate the same predicted "extra movement"
-	// the client applied (reducing correction jitter under bad network conditions).
+	DefaultMovementStateParams.MaxWalkSpeed = MaxWalkSpeed;
+	DefaultMovementStateParams.MaxAcceleration = MaxAcceleration;
+	DefaultMovementStateParams.BrakingDecelerationWalking = BrakingDecelerationWalking;
+	DefaultMovementStateParams.GroundFriction = GroundFriction;
+	DefaultMovementStateParams.RotationRate = RotationRate;
+	DefaultMovementStateParams.bOrientRotationToMovement = bOrientRotationToMovement;
+	DefaultMovementStateParams.bUseControllerDesiredRotation = bUseControllerDesiredRotation;
+
 	SetNetworkMoveDataContainer(NetworkMoveDataContainer);
 }
 
-int32 UActCharacterMovementComponent::SetAddMoveWorld(FVector WorldVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle)
+void UActCharacterMovementComponent::SetReplicatedAcceleration(const FVector& InAcceleration)
+{
+	bHasReplicatedAcceleration = true;
+	Acceleration = InAcceleration;
+}
+
+const FActCharacterGroundInfo& UActCharacterMovementComponent::GetGroundInfo()
+{
+	if (!CharacterOwner || (GFrameCounter == CachedGroundInfo.LastUpdateFrame))
+	{
+		return CachedGroundInfo;
+	}
+
+	if (MovementMode == MOVE_Walking)
+	{
+		CachedGroundInfo.GroundHitResult = CurrentFloor.HitResult;
+		CachedGroundInfo.GroundDistance = 0.0f;
+	}
+	else
+	{
+		const UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent();
+		check(CapsuleComp);
+
+		const float CapsuleHalfHeight = CapsuleComp->GetUnscaledCapsuleHalfHeight();
+		const ECollisionChannel CollisionChannel = UpdatedComponent ? UpdatedComponent->GetCollisionObjectType() : ECC_Pawn;
+		const FVector TraceStart(GetActorLocation());
+		const FVector TraceEnd(TraceStart.X, TraceStart.Y, TraceStart.Z - ActCharacter::GroundTraceDistance - CapsuleHalfHeight);
+
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ActCharacterMovementComponent_GetGroundInfo), false, CharacterOwner);
+		FCollisionResponseParams ResponseParams;
+		InitCollisionParams(QueryParams, ResponseParams);
+
+		FHitResult HitResult;
+		GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, CollisionChannel, QueryParams, ResponseParams);
+
+		CachedGroundInfo.GroundHitResult = HitResult;
+		CachedGroundInfo.GroundDistance = ActCharacter::GroundTraceDistance;
+
+		if (MovementMode == MOVE_NavWalking)
+		{
+			CachedGroundInfo.GroundDistance = 0.0f;
+		}
+		else if (HitResult.bBlockingHit)
+		{
+			CachedGroundInfo.GroundDistance = FMath::Max(HitResult.Distance - CapsuleHalfHeight, 0.0f);
+		}
+	}
+
+	CachedGroundInfo.LastUpdateFrame = GFrameCounter;
+	return CachedGroundInfo;
+}
+
+void UActCharacterMovementComponent::ApplyMovementStateParams(const FActMovementStateParams& Params)
+{
+	MaxWalkSpeed = Params.MaxWalkSpeed;
+	MaxAcceleration = Params.MaxAcceleration;
+	BrakingDecelerationWalking = Params.BrakingDecelerationWalking;
+	GroundFriction = Params.GroundFriction;
+	RotationRate = Params.RotationRate;
+	bOrientRotationToMovement = Params.bOrientRotationToMovement;
+	bUseControllerDesiredRotation = Params.bUseControllerDesiredRotation;
+}
+
+void UActCharacterMovementComponent::ResetMovementStateParams()
+{
+	ApplyMovementStateParams(DefaultMovementStateParams);
+}
+
+int32 UActCharacterMovementComponent::PushMovementStateParams(const FActMovementStateParams& Params, const int32 ExistingHandle)
+{
+	if (ExistingHandle != INDEX_NONE)
+	{
+		if (FActMovementStateStackEntry* ExistingEntry = MovementStateStack.FindByPredicate(
+			[ExistingHandle](const FActMovementStateStackEntry& Entry)
+			{
+				return Entry.Handle == ExistingHandle;
+			}))
+		{
+			ExistingEntry->Params = Params;
+			const FActMovementStateStackEntry UpdatedEntry = *ExistingEntry;
+			MovementStateStack.RemoveAll([ExistingHandle](const FActMovementStateStackEntry& Entry) { return Entry.Handle == ExistingHandle; });
+			MovementStateStack.Add(UpdatedEntry);
+			RefreshMovementStateParamsFromStack();
+			return ExistingHandle;
+		}
+	}
+
+	FActMovementStateStackEntry& NewEntry = MovementStateStack.AddDefaulted_GetRef();
+	NewEntry.Handle = NextMovementStateHandle++;
+	NewEntry.Params = Params;
+	RefreshMovementStateParamsFromStack();
+	return NewEntry.Handle;
+}
+
+bool UActCharacterMovementComponent::PopMovementStateParams(const int32 Handle)
+{
+	const int32 RemovedCount = MovementStateStack.RemoveAll(
+		[Handle](const FActMovementStateStackEntry& Entry)
+		{
+			return Entry.Handle == Handle;
+		});
+
+	if (RemovedCount <= 0)
+	{
+		return false;
+	}
+
+	RefreshMovementStateParamsFromStack();
+	return true;
+}
+
+void UActCharacterMovementComponent::ClearMovementStateParamsStack()
+{
+	MovementStateStack.Reset();
+	RefreshMovementStateParamsFromStack();
+}
+
+int32 UActCharacterMovementComponent::GenerateAddMoveSyncId()
+{
+	int32 SyncId = NextGeneratedAddMoveSyncId++;
+	if (SyncId == INDEX_NONE)
+	{
+		SyncId = NextGeneratedAddMoveSyncId++;
+	}
+
+	return SyncId;
+}
+
+int32 UActCharacterMovementComponent::SetAddMoveWorld(FVector WorldVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle, int32 SyncId)
 {
 	FActAddMoveParams Params;
 	Params.SourceType = EActAddMoveSourceType::Velocity;
@@ -34,10 +171,11 @@ int32 UActCharacterMovementComponent::SetAddMoveWorld(FVector WorldVelocity, flo
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
+	Params.SyncId = SyncId;
 	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
-int32 UActCharacterMovementComponent::SetAddMove(FVector LocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle)
+int32 UActCharacterMovementComponent::SetAddMove(FVector LocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle, int32 SyncId)
 {
 	FActAddMoveParams Params;
 	Params.SourceType = EActAddMoveSourceType::Velocity;
@@ -46,10 +184,11 @@ int32 UActCharacterMovementComponent::SetAddMove(FVector LocalVelocity, float Du
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
+	Params.SyncId = SyncId;
 	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
-int32 UActCharacterMovementComponent::SetAddMoveWithMesh(USkeletalMeshComponent* Mesh, FVector MeshLocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle)
+int32 UActCharacterMovementComponent::SetAddMoveWithMesh(USkeletalMeshComponent* Mesh, FVector MeshLocalVelocity, float Duration, EActAddMoveCurveType CurveType, UCurveFloat* Curve, int32 ExistingHandle, int32 SyncId)
 {
 	FActAddMoveParams Params;
 	Params.SourceType = EActAddMoveSourceType::Velocity;
@@ -58,15 +197,25 @@ int32 UActCharacterMovementComponent::SetAddMoveWithMesh(USkeletalMeshComponent*
 	Params.Duration = Duration;
 	Params.CurveType = CurveType;
 	Params.Curve = Curve;
+	Params.SyncId = SyncId;
 	return ApplyAddMoveParams(Params, Mesh, ExistingHandle);
 }
 
 int32 UActCharacterMovementComponent::ApplyAddMoveParams(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle)
 {
-	return SetAddMoveInternal(Params, Mesh, ExistingHandle);
+	return SetAddMoveInternal(Params, Mesh, ExistingHandle, true);
 }
 
-int32 UActCharacterMovementComponent::SetAddMoveFromMontage(UAnimMontage* Montage, float StartTrackPosition, float EndTrackPosition, float Duration, bool bApplyRotation, bool bIgnoreZAccumulate, int32 ExistingHandle, int32 SyncId)
+int32 UActCharacterMovementComponent::SetAddMoveFromRootMotionRange(
+	UAnimMontage* Montage,
+	float StartTrackPosition,
+	float EndTrackPosition,
+	float Duration,
+	bool bApplyRotation,
+	bool bRespectAddMoveRotation,
+	bool bIgnoreZAccumulate,
+	int32 ExistingHandle,
+	int32 SyncId)
 {
 	FActAddMoveParams Params;
 	Params.SourceType = EActAddMoveSourceType::MontageRootMotion;
@@ -76,32 +225,15 @@ int32 UActCharacterMovementComponent::SetAddMoveFromMontage(UAnimMontage* Montag
 	Params.StartTrackPosition = StartTrackPosition;
 	Params.EndTrackPosition = EndTrackPosition;
 	Params.bApplyRotation = bApplyRotation;
+	Params.bRespectAddMoveRotation = bRespectAddMoveRotation;
 	Params.bIgnoreZAccumulate = bIgnoreZAccumulate;
 	Params.SyncId = SyncId;
-
-	// Important: montage-derived movement is still executed as "AddMove" (i.e. displacement overlay),
-	// not as native montage root motion. The montage is free to play for visuals/events while the
-	// authoritative movement is simulated here for prediction + networking.
 	return ApplyAddMoveParams(Params, nullptr, ExistingHandle);
 }
 
 bool UActCharacterMovementComponent::StopAddMove(int32 Handle)
 {
-	if (Handle == INDEX_NONE)
-	{
-		return false;
-	}
-
-	const FActVelocityAdditionState* RemovedState = VelocityAdditionMap.Find(Handle);
-	RemoveAddMoveMappings(Handle, RemovedState);
-
-	const bool bRemoved = VelocityAdditionMap.Remove(Handle) > 0;
-	if (bRemoved)
-	{
-		++AddMoveStateRevision;
-	}
-	UpdateAddMoveNetworkCorrectionMode();
-	return bRemoved;
+	return StopAddMoveInternal(Handle, true);
 }
 
 bool UActCharacterMovementComponent::StopAddMoveWithMesh(USkeletalMeshComponent* Mesh)
@@ -111,17 +243,90 @@ bool UActCharacterMovementComponent::StopAddMoveWithMesh(USkeletalMeshComponent*
 		return false;
 	}
 
-	if (const int32* Handle = VelocityAdditionMapByMesh.Find(Mesh))
+	if (const int32* Handle = AddMoveStateMapByMesh.Find(Mesh))
 	{
-		const int32 HandleValue = *Handle;
-		RemoveAddMoveMappings(HandleValue, VelocityAdditionMap.Find(HandleValue));
-		const bool bRemoved = VelocityAdditionMap.Remove(HandleValue) > 0;
-		if (bRemoved)
+		return StopAddMoveInternal(*Handle, true);
+	}
+
+	return false;
+}
+
+bool UActCharacterMovementComponent::StopAddMoveBySyncId(const int32 SyncId)
+{
+	if (SyncId == INDEX_NONE)
+	{
+		return false;
+	}
+
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
+	{
+		return StopAddMoveInternal(*Handle, true);
+	}
+
+	return false;
+}
+
+bool UActCharacterMovementComponent::PauseAddMove(const int32 Handle)
+{
+	const FActAddMoveState* State = AddMoveStateMap.Find(Handle);
+	const int32 SyncId = State ? State->Params.SyncId : INDEX_NONE;
+	const bool bPaused = PauseAddMoveInternal(Handle);
+
+	if (bPaused && SyncId != INDEX_NONE)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
 		{
-			++AddMoveStateRevision;
+			ActCharacter->MulticastPauseAddMove(SyncId);
+			ActCharacter->ForceNetUpdate();
 		}
-		UpdateAddMoveNetworkCorrectionMode();
-		return bRemoved;
+	}
+
+	return bPaused;
+}
+
+bool UActCharacterMovementComponent::ResumeAddMove(const int32 Handle)
+{
+	const FActAddMoveState* State = AddMoveStateMap.Find(Handle);
+	const int32 SyncId = State ? State->Params.SyncId : INDEX_NONE;
+	const bool bResumed = ResumeAddMoveInternal(Handle);
+
+	if (bResumed && SyncId != INDEX_NONE)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			ActCharacter->MulticastResumeAddMove(SyncId);
+			ActCharacter->ForceNetUpdate();
+		}
+	}
+
+	return bResumed;
+}
+
+bool UActCharacterMovementComponent::PauseAddMoveBySyncId(const int32 SyncId)
+{
+	if (SyncId == INDEX_NONE)
+	{
+		return false;
+	}
+
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
+	{
+		return PauseAddMove(*Handle);
+	}
+
+	return false;
+}
+
+bool UActCharacterMovementComponent::ResumeAddMoveBySyncId(const int32 SyncId)
+{
+	if (SyncId == INDEX_NONE)
+	{
+		return false;
+	}
+
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
+	{
+		return ResumeAddMove(*Handle);
 	}
 
 	return false;
@@ -129,79 +334,185 @@ bool UActCharacterMovementComponent::StopAddMoveWithMesh(USkeletalMeshComponent*
 
 void UActCharacterMovementComponent::StopAllAddMove()
 {
-	VelocityAdditionMap.Empty();
-	VelocityAdditionMapByMesh.Empty();
-	VelocityAdditionMapBySyncId.Empty();
+	TArray<int32> SyncIdsToBroadcast;
+	SyncIdsToBroadcast.Reserve(AddMoveStateMap.Num());
+	for (const TPair<int32, FActAddMoveState>& Pair : AddMoveStateMap)
+	{
+		if (Pair.Value.Params.SyncId != INDEX_NONE)
+		{
+			SyncIdsToBroadcast.AddUnique(Pair.Value.Params.SyncId);
+		}
+	}
+
+	AddMoveStateMap.Empty();
+	AddMoveStateMapByMesh.Empty();
+	AddMoveStateMapBySyncId.Empty();
 	PendingAddMoveDisplacement = FVector::ZeroVector;
 	PendingAddMoveRotationDelta = FQuat::Identity;
 	++AddMoveStateRevision;
 	UpdateAddMoveNetworkCorrectionMode();
+
+	if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+	{
+		for (const int32 SyncId : SyncIdsToBroadcast)
+		{
+			ActCharacter->MulticastStopAddMove(SyncId);
+		}
+		ActCharacter->ForceNetUpdate();
+	}
 }
 
 bool UActCharacterMovementComponent::HasActiveAddMove() const
 {
-	return VelocityAdditionMap.Num() > 0;
+	return AddMoveStateMap.Num() > 0;
 }
 
-void UActCharacterMovementComponent::WarpRotationToActor(AActor* Target, EActRotationWarpActorMode ActorMode, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
+bool UActCharacterMovementComponent::HasAddMoveBySyncId(const int32 SyncId) const
 {
-	if (!IsValid(Target))
-	{
-		ClearRotationWarp();
-		return;
-	}
-
-	RotationWarpRequest = FActRotationWarpRequest();
-	RotationWarpRequest.bIsSet = true;
-	RotationWarpRequest.SourceType = EActRotationWarpSourceType::Actor;
-	RotationWarpRequest.TargetActor = Target;
-	RotationWarpRequest.ActorMode = ActorMode;
-	RotationWarpRequest.RotationRate = FMath::Max(0.0f, InRotationRate);
-	RotationWarpRequest.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
-	RotationWarpRequest.bClearOnReached = bClearOnReached;
+	return AddMoveStateMapBySyncId.Contains(SyncId);
 }
 
-void UActCharacterMovementComponent::WarpRotationToDirection(FVector WorldDirection, float InRotationRate, float InAcceptableYawError, bool bClearOnReached)
+void UActCharacterMovementComponent::SetAddMoveRotationToActor(AActor* Target, EActAddMoveRotationActorMode ActorMode, float InRotationRate, float AcceptableYawError, bool bClearOnReached, int32 SyncId)
+{
+	FActAddMoveRotationParams Params;
+	Params.SourceType = EActAddMoveRotationSourceType::Actor;
+	Params.TargetActor = Target;
+	Params.ActorMode = ActorMode;
+	Params.RotationRate = FMath::Max(0.0f, InRotationRate);
+	Params.AcceptableYawError = FMath::Max(0.0f, AcceptableYawError);
+	Params.bClearOnReached = bClearOnReached;
+	Params.SyncId = SyncId;
+	SetAddMoveRotationInternal(Params, true);
+}
+
+void UActCharacterMovementComponent::SetAddMoveRotationToDirection(FVector WorldDirection, float InRotationRate, float AcceptableYawError, bool bClearOnReached, int32 SyncId)
 {
 	WorldDirection.Z = 0.0f;
-	if (WorldDirection.IsNearlyZero())
+
+	FActAddMoveRotationParams Params;
+	Params.SourceType = EActAddMoveRotationSourceType::Direction;
+	Params.Direction = WorldDirection.GetSafeNormal();
+	Params.RotationRate = FMath::Max(0.0f, InRotationRate);
+	Params.AcceptableYawError = FMath::Max(0.0f, AcceptableYawError);
+	Params.bClearOnReached = bClearOnReached;
+	Params.SyncId = SyncId;
+	SetAddMoveRotationInternal(Params, true);
+}
+
+void UActCharacterMovementComponent::ClearAddMoveRotation()
+{
+	ClearAddMoveRotationInternal(true);
+}
+
+bool UActCharacterMovementComponent::HasActiveAddMoveRotation() const
+{
+	return GetAddMoveRotationParams() != nullptr;
+}
+
+const FActAddMoveRotationParams* UActCharacterMovementComponent::GetAddMoveRotationParams() const
+{
+	if (!AddMoveRotationParams.IsValidRequest())
 	{
-		ClearRotationWarp();
+		return nullptr;
+	}
+
+	if (AddMoveRotationParams.SourceType == EActAddMoveRotationSourceType::Direction && AddMoveRotationParams.Direction.IsNearlyZero())
+	{
+		return nullptr;
+	}
+
+	return &AddMoveRotationParams;
+}
+
+void UActCharacterMovementComponent::ApplyReplicatedAddMove(const FActAddMoveParams& Params)
+{
+	// Owner-side predicted abilities may already have created the same SyncId-backed AddMove locally.
+	// Do not restart it from server multicast or the client will replay the startup displacement.
+	if (Params.SyncId != INDEX_NONE && CharacterOwner && CharacterOwner->IsLocallyControlled() && HasAddMoveBySyncId(Params.SyncId))
+	{
 		return;
 	}
 
-	RotationWarpRequest = FActRotationWarpRequest();
-	RotationWarpRequest.bIsSet = true;
-	RotationWarpRequest.SourceType = EActRotationWarpSourceType::Direction;
-	RotationWarpRequest.Direction = WorldDirection.GetSafeNormal();
-	RotationWarpRequest.RotationRate = FMath::Max(0.0f, InRotationRate);
-	RotationWarpRequest.AcceptableYawError = FMath::Max(0.0f, InAcceptableYawError);
-	RotationWarpRequest.bClearOnReached = bClearOnReached;
+	USkeletalMeshComponent* Mesh = nullptr;
+	if (Params.Space == EActAddMoveSpace::Mesh && CharacterOwner)
+	{
+		Mesh = CharacterOwner->GetMesh();
+	}
+
+	SetAddMoveInternal(Params, Mesh, INDEX_NONE, false);
 }
 
-void UActCharacterMovementComponent::ClearRotationWarp()
+void UActCharacterMovementComponent::StopReplicatedAddMove(const int32 SyncId)
 {
-	RotationWarpRequest = FActRotationWarpRequest();
+	if (SyncId == INDEX_NONE)
+	{
+		return;
+	}
+
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
+	{
+		StopAddMoveInternal(*Handle, false);
+	}
 }
 
-const FActRotationWarpRequest* UActCharacterMovementComponent::GetRotationWarpRequest() const
+void UActCharacterMovementComponent::PauseReplicatedAddMove(const int32 SyncId)
 {
-	if (!RotationWarpRequest.bIsSet)
+	if (SyncId == INDEX_NONE)
 	{
-		return nullptr;
+		return;
 	}
 
-	if (RotationWarpRequest.SourceType == EActRotationWarpSourceType::Actor && !RotationWarpRequest.TargetActor.IsValid())
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
 	{
-		return nullptr;
+		if (FActAddMoveState* State = AddMoveStateMap.Find(*Handle))
+		{
+			// Replicated pause is absolute state sync, not a new gameplay-side pause request.
+			if (State->PauseLockCount <= 0)
+			{
+				PauseAddMoveInternal(*Handle);
+			}
+		}
+	}
+}
+
+void UActCharacterMovementComponent::ResumeReplicatedAddMove(const int32 SyncId)
+{
+	if (SyncId == INDEX_NONE)
+	{
+		return;
 	}
 
-	if (RotationWarpRequest.SourceType == EActRotationWarpSourceType::Direction && RotationWarpRequest.Direction.IsNearlyZero())
+	if (const int32* Handle = AddMoveStateMapBySyncId.Find(SyncId))
 	{
-		return nullptr;
+		if (FActAddMoveState* State = AddMoveStateMap.Find(*Handle))
+		{
+			// Resume from replication clears the replicated pause state instead of decrementing gameplay locks.
+			if (State->PauseLockCount > 0)
+			{
+				State->PauseLockCount = 0;
+				++AddMoveStateRevision;
+			}
+		}
+	}
+}
+
+void UActCharacterMovementComponent::ApplyReplicatedAddMoveRotation(const FActAddMoveRotationParams& Params)
+{
+	if (Params.SyncId != INDEX_NONE &&
+		CharacterOwner &&
+		CharacterOwner->IsLocallyControlled() &&
+		GetAddMoveRotationParams() &&
+		GetAddMoveRotationParams()->SyncId == Params.SyncId)
+	{
+		return;
 	}
 
-	return &RotationWarpRequest;
+	SetAddMoveRotationInternal(Params, false);
+}
+
+void UActCharacterMovementComponent::ClearReplicatedAddMoveRotation()
+{
+	ClearAddMoveRotationInternal(false);
 }
 
 FNetworkPredictionData_Client* UActCharacterMovementComponent::GetPredictionData_Client() const
@@ -223,6 +534,7 @@ void UActCharacterMovementComponent::MoveAutonomous(float ClientTimeStamp, float
 {
 	if (const FActCharacterNetworkMoveData* ActMoveData = static_cast<const FActCharacterNetworkMoveData*>(GetCurrentNetworkMoveData()))
 	{
+		// Server move RPCs only carry network-identified snapshots, so restore them before simulation.
 		RestoreAddMoveSnapshots(ActMoveData->AddMoveSnapshots, true);
 	}
 
@@ -245,90 +557,41 @@ void UActCharacterMovementComponent::SimulateMovement(float DeltaTime)
 
 bool UActCharacterMovementComponent::CanAttemptJump() const
 {
-	// Same as UCharacterMovementComponent's implementation but without the crouch check
-	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling()); // Falling included for double-jump and non-zero jump hold time, but validated by character.
+	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling());
 }
 
-const FActCharacterGroundInfo& UActCharacterMovementComponent::GetGroundInfo()
-{
-	if (!CharacterOwner || (GFrameCounter == CachedGroundInfo.LastUpdateFrame))
-	{
-		return CachedGroundInfo;
-	}
-
-	if (MovementMode == MOVE_Walking)
-	{
-		CachedGroundInfo.GroundHitResult = CurrentFloor.HitResult;
-		CachedGroundInfo.GroundDistance = 0.0f;
-	}
-	else
-	{
-		const UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent();
-		check(CapsuleComp);
-
-		const float CapsuleHalfHeight = CapsuleComp->GetUnscaledCapsuleHalfHeight();
-		const ECollisionChannel CollisionChannel = (UpdatedComponent ? UpdatedComponent->GetCollisionObjectType() : ECC_Pawn);
-		const FVector TraceStart(GetActorLocation());
-		const FVector TraceEnd(TraceStart.X, TraceStart.Y, (TraceStart.Z - ActCharacter::GroundTraceDistance - CapsuleHalfHeight));
-
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ActCharacterMovementComponent_GetGroundInfo), false, CharacterOwner);
-		FCollisionResponseParams ResponseParam;
-		InitCollisionParams(QueryParams, ResponseParam);
-
-		FHitResult HitResult;
-		GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, CollisionChannel, QueryParams, ResponseParam);
-
-		CachedGroundInfo.GroundHitResult = HitResult;
-		CachedGroundInfo.GroundDistance = ActCharacter::GroundTraceDistance;
-
-		if (MovementMode == MOVE_NavWalking)
-		{
-			CachedGroundInfo.GroundDistance = 0.0f;
-		}
-		else if (HitResult.bBlockingHit)
-		{
-			CachedGroundInfo.GroundDistance = FMath::Max((HitResult.Distance - CapsuleHalfHeight), 0.0f);
-		}
-	}
-
-	CachedGroundInfo.LastUpdateFrame = GFrameCounter;
-
-	return CachedGroundInfo;
-}
-
-void UActCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation,
-	const FVector& OldVelocity)
+void UActCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity)
 {
 	UCharacterMovementComponent::OnMovementUpdated(DeltaSeconds, OldLocation, OldVelocity);
-	
+
 	const bool bOldHasAcceleration = bHasAcceleration;
-	const float Accel2DSizeSq = GetHasAcceleration();
-	bHasAcceleration = Accel2DSizeSq > KINDA_SMALL_NUMBER;
+	const bool bOldIsOnGround = bIsOnGround;
+	bHasAcceleration = GetHasAcceleration();
+	bIsOnGround = IsMovingOnGround();
 
 	if (bHasAcceleration != bOldHasAcceleration)
 	{
 		OnAccelerationStateChanged.Broadcast(bOldHasAcceleration, bHasAcceleration);
 	}
 
-	// ApplyPendingAddMove executes the displacement overlay after the base movement update.
-	//
-	// Why here:
-	// - We want AddMove to "stack" on top of regular character movement, root motion sources, etc.
-	// - We keep it in one place so prediction/replay uses the exact same order on both sides.
-	ApplyPendingAddMove(DeltaSeconds);
-}
+	if (bIsOnGround != bOldIsOnGround)
+	{
+		OnGroundStateChanged.Broadcast(bOldIsOnGround, bIsOnGround);
+	}
 
-void UActCharacterMovementComponent::SetReplicatedAcceleration(const FVector& InAcceleration)
-{
-	bHasReplicatedAcceleration = true;
-	Acceleration = InAcceleration;
+	ApplyPendingAddMove(DeltaSeconds);
+
+	// Anim root motion can own yaw after PhysicsRotation is skipped. Re-apply explicit rotation
+	// AddMove here so hit-react / attack facing still works during authored RM montages.
+	if (HasAnimRootMotion() && GetAddMoveRotationParams())
+	{
+		TryApplyAddMoveRotation(DeltaSeconds);
+	}
 }
 
 void UActCharacterMovementComponent::PhysicsRotation(float DeltaTime)
 {
-	// Explicit rotation warp tasks outrank lock-on. They are authored one-shot alignment requests
-	// for combat movement, not long-lived target ownership.
-	if (TryApplyRotationWarp(DeltaTime))
+	if (TryApplyAddMoveRotation(DeltaTime))
 	{
 		return;
 	}
@@ -337,7 +600,6 @@ void UActCharacterMovementComponent::PhysicsRotation(float DeltaTime)
 	const bool bStrafeMoveActive = TagInterface && TagInterface->HasMatchingGameplayTag(Event_Movement_StrafeMove);
 	if (bStrafeMoveActive)
 	{
-		// In strafe-move state we never auto-orient to movement; only rotate when lock-on can drive it.
 		TryApplyStrafeRotation(DeltaTime);
 		return;
 	}
@@ -345,43 +607,43 @@ void UActCharacterMovementComponent::PhysicsRotation(float DeltaTime)
 	Super::PhysicsRotation(DeltaTime);
 }
 
-bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
+bool UActCharacterMovementComponent::TryApplyAddMoveRotation(float DeltaTime)
 {
 	if (!CharacterOwner || !UpdatedComponent)
 	{
 		return false;
 	}
 
-	const FActRotationWarpRequest* WarpRequest = GetRotationWarpRequest();
-	if (!WarpRequest)
+	const FActAddMoveRotationParams* RotationParams = GetAddMoveRotationParams();
+	if (!RotationParams)
 	{
 		return false;
 	}
 
 	FVector DesiredDirection = FVector::ZeroVector;
-	switch (WarpRequest->SourceType)
+	switch (RotationParams->SourceType)
 	{
-	case EActRotationWarpSourceType::Actor:
+	case EActAddMoveRotationSourceType::Actor:
 		{
-			AActor* TargetActor = WarpRequest->TargetActor.Get();
+			AActor* TargetActor = RotationParams->TargetActor.Get();
 			if (!TargetActor)
 			{
-				ClearRotationWarp();
+				ClearAddMoveRotationInternal(false);
 				return false;
 			}
 
-			switch (WarpRequest->ActorMode)
+			switch (RotationParams->ActorMode)
 			{
-			case EActRotationWarpActorMode::MatchTargetForward:
+			case EActAddMoveRotationActorMode::MatchTargetForward:
 				DesiredDirection = TargetActor->GetActorForwardVector();
 				break;
-			case EActRotationWarpActorMode::MatchOppositeTargetForward:
+			case EActAddMoveRotationActorMode::MatchOppositeTargetForward:
 				DesiredDirection = -TargetActor->GetActorForwardVector();
 				break;
-			case EActRotationWarpActorMode::FaceTarget:
+			case EActAddMoveRotationActorMode::FaceTarget:
 				DesiredDirection = TargetActor->GetActorLocation() - CharacterOwner->GetActorLocation();
 				break;
-			case EActRotationWarpActorMode::BackToTarget:
+			case EActAddMoveRotationActorMode::BackToTarget:
 				DesiredDirection = CharacterOwner->GetActorLocation() - TargetActor->GetActorLocation();
 				break;
 			default:
@@ -389,8 +651,8 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 			}
 		}
 		break;
-	case EActRotationWarpSourceType::Direction:
-		DesiredDirection = WarpRequest->Direction;
+	case EActAddMoveRotationSourceType::Direction:
+		DesiredDirection = RotationParams->Direction;
 		break;
 	default:
 		break;
@@ -399,7 +661,10 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 	DesiredDirection.Z = 0.0f;
 	if (DesiredDirection.IsNearlyZero())
 	{
-		ClearRotationWarp();
+		if (RotationParams->SourceType == EActAddMoveRotationSourceType::Direction)
+		{
+			ClearAddMoveRotationInternal(false);
+		}
 		return false;
 	}
 
@@ -408,14 +673,14 @@ bool UActCharacterMovementComponent::TryApplyRotationWarp(float DeltaTime)
 	DesiredRotation.Pitch = 0.0f;
 	DesiredRotation.Roll = 0.0f;
 
-	const float RotationSpeed = WarpRequest->RotationRate > UE_SMALL_NUMBER ? WarpRequest->RotationRate : RotationRate.Yaw;
-	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, DeltaTime, RotationSpeed);
+	const float YawRate = RotationParams->RotationRate > UE_SMALL_NUMBER ? RotationParams->RotationRate : RotationRate.Yaw;
+	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, DeltaTime, YawRate);
 	MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
 
 	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(NewRotation.Yaw, DesiredRotation.Yaw));
-	if (WarpRequest->bClearOnReached && YawError <= WarpRequest->AcceptableYawError)
+	if (RotationParams->bClearOnReached && YawError <= RotationParams->AcceptableYawError)
 	{
-		ClearRotationWarp();
+		ClearAddMoveRotationInternal(false);
 	}
 
 	return true;
@@ -428,24 +693,20 @@ bool UActCharacterMovementComponent::TryApplyStrafeRotation(float DeltaTime)
 		return false;
 	}
 
-	// Strafe movement itself only owns "lock-on locomotion" facing.
-	// Attack abilities that want a turn-in-place / align-on-start should request an explicit
-	// one-shot rotation warp on activation instead of relying on this path.
 	const bool bHasMoveInput = GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER || Velocity.SizeSquared2D() > KINDA_SMALL_NUMBER;
 	if (!bHasMoveInput)
 	{
 		return false;
 	}
 
-	UActBattleComponent* BattleComp = CharacterOwner->FindComponentByClass<UActBattleComponent>();
-	AActor* LockOnTarget = BattleComp ? BattleComp->GetLockOnTarget() : nullptr;
+	UActBattleComponent* BattleComponent = CharacterOwner->FindComponentByClass<UActBattleComponent>();
+	AActor* LockOnTarget = BattleComponent ? BattleComponent->GetLockOnTarget() : nullptr;
 	if (!LockOnTarget)
 	{
-		// Strafe is active but no valid target; keep current facing.
 		return false;
 	}
 
-	const FVector ToTarget = (LockOnTarget->GetActorLocation() - CharacterOwner->GetActorLocation());
+	const FVector ToTarget = LockOnTarget->GetActorLocation() - CharacterOwner->GetActorLocation();
 	if (ToTarget.IsNearlyZero())
 	{
 		return false;
@@ -456,22 +717,31 @@ bool UActCharacterMovementComponent::TryApplyStrafeRotation(float DeltaTime)
 	DesiredRotation.Pitch = 0.0f;
 	DesiredRotation.Roll = 0.0f;
 
-	const float YawRate = RotationRate.Yaw;
-	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, DeltaTime, YawRate);
+	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, DeltaTime, RotationRate.Yaw);
 	MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
 	return true;
 }
 
-int32 UActCharacterMovementComponent::SetAddMoveInternal(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle)
+int32 UActCharacterMovementComponent::SetAddMoveInternal(FActAddMoveParams Params, USkeletalMeshComponent* Mesh, int32 ExistingHandle, const bool bBroadcastToSimulatedProxies)
 {
 	if (Params.Duration == 0.0f)
 	{
 		return INDEX_NONE;
 	}
 
+	if (Params.SyncId == INDEX_NONE)
+	{
+		// Authority-generated SyncIds give Blueprint-authored server moves a stable identity for
+		// simulated-proxy bootstrap and owner/server replay alignment.
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			Params.SyncId = GenerateAddMoveSyncId();
+		}
+	}
+
 	const int32 Handle = AcquireAddMoveHandle(ExistingHandle, Params.SyncId);
 
-	FActVelocityAdditionState& State = VelocityAdditionMap.FindOrAdd(Handle);
+	FActAddMoveState& State = AddMoveStateMap.FindOrAdd(Handle);
 	RemoveAddMoveMappings(Handle, &State);
 	State.Handle = Handle;
 	State.Params = Params;
@@ -480,28 +750,84 @@ int32 UActCharacterMovementComponent::SetAddMoveInternal(const FActAddMoveParams
 
 	if (Mesh)
 	{
-		VelocityAdditionMapByMesh.FindOrAdd(Mesh) = Handle;
+		AddMoveStateMapByMesh.FindOrAdd(Mesh) = Handle;
 	}
 	if (Params.SyncId != INDEX_NONE)
 	{
-		VelocityAdditionMapBySyncId.FindOrAdd(Params.SyncId) = Handle;
+		AddMoveStateMapBySyncId.FindOrAdd(Params.SyncId) = Handle;
 	}
 
 	++AddMoveStateRevision;
 	UpdateAddMoveNetworkCorrectionMode();
+
+	if (bBroadcastToSimulatedProxies)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			// Simulated proxies do not execute the gameplay task graph, so bootstrap the authored AddMove explicitly.
+			ActCharacter->MulticastBootstrapAddMove(State.Params);
+			ActCharacter->ForceNetUpdate();
+		}
+	}
+
 	return Handle;
 }
 
-bool UActCharacterMovementComponent::StopAddMoveBySyncId(const int32 SyncId)
+bool UActCharacterMovementComponent::StopAddMoveInternal(const int32 Handle, const bool bBroadcastToSimulatedProxies)
 {
-	if (SyncId == INDEX_NONE)
+	if (Handle == INDEX_NONE)
 	{
 		return false;
 	}
 
-	if (const int32* Handle = VelocityAdditionMapBySyncId.Find(SyncId))
+	const FActAddMoveState* RemovedState = AddMoveStateMap.Find(Handle);
+	const int32 SyncId = RemovedState ? RemovedState->Params.SyncId : INDEX_NONE;
+	RemoveAddMoveMappings(Handle, RemovedState);
+
+	const bool bRemoved = AddMoveStateMap.Remove(Handle) > 0;
+	if (!bRemoved)
 	{
-		return StopAddMove(*Handle);
+		return false;
+	}
+
+	++AddMoveStateRevision;
+	UpdateAddMoveNetworkCorrectionMode();
+
+	if (bBroadcastToSimulatedProxies && SyncId != INDEX_NONE)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			ActCharacter->MulticastStopAddMove(SyncId);
+			ActCharacter->ForceNetUpdate();
+		}
+	}
+
+	return true;
+}
+
+bool UActCharacterMovementComponent::PauseAddMoveInternal(const int32 Handle)
+{
+	if (FActAddMoveState* State = AddMoveStateMap.Find(Handle))
+	{
+		++State->PauseLockCount;
+		++AddMoveStateRevision;
+		return true;
+	}
+
+	return false;
+}
+
+bool UActCharacterMovementComponent::ResumeAddMoveInternal(const int32 Handle)
+{
+	if (FActAddMoveState* State = AddMoveStateMap.Find(Handle))
+	{
+		const int32 NewPauseLockCount = FMath::Max(0, State->PauseLockCount - 1);
+		if (NewPauseLockCount != State->PauseLockCount)
+		{
+			State->PauseLockCount = NewPauseLockCount;
+			++AddMoveStateRevision;
+		}
+		return true;
 	}
 
 	return false;
@@ -513,14 +839,29 @@ FVector UActCharacterMovementComponent::ConsumeAddMoveDisplacement(float DeltaSe
 	OutRotationDelta = FQuat::Identity;
 
 	TArray<int32> HandlesToRemove;
-	HandlesToRemove.Reserve(VelocityAdditionMap.Num());
-	for (TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
+	HandlesToRemove.Reserve(AddMoveStateMap.Num());
+	for (TPair<int32, FActAddMoveState>& Pair : AddMoveStateMap)
 	{
 		const int32 Handle = Pair.Key;
-		FActVelocityAdditionState& State = Pair.Value;
+		FActAddMoveState& State = Pair.Value;
 
-		if (State.Params.SourceType == EActAddMoveSourceType::Velocity && State.Params.Space == EActAddMoveSpace::Mesh && !State.Mesh.IsValid())
+		if (State.PauseLockCount > 0)
 		{
+			// Paused AddMove keeps runtime state but contributes no displacement/time this frame.
+			continue;
+		}
+
+		if (State.Params.SourceType == EActAddMoveSourceType::Velocity &&
+			State.Params.Space == EActAddMoveSpace::Mesh &&
+			!State.Mesh.IsValid())
+		{
+			HandlesToRemove.Add(Handle);
+			continue;
+		}
+
+		if (!DoesAddMovePassModeFilter(State.Params))
+		{
+			// Mode-gated AddMove is considered finished once its movement-mode requirement no longer matches.
 			HandlesToRemove.Add(Handle);
 			continue;
 		}
@@ -539,9 +880,22 @@ FVector UActCharacterMovementComponent::ConsumeAddMoveDisplacement(float DeltaSe
 
 		bool bHasRotationDelta = false;
 		FQuat RotationDelta = FQuat::Identity;
-		const FVector AddDisplacement = ResolveAddMoveDisplacement(State.Params, State.Mesh.Get(), PreviousElapsedTime, NewElapsedTime, DeltaSeconds, bHasRotationDelta, RotationDelta);
+		const FVector AddDisplacement = ResolveAddMoveDisplacement(
+			State.Params,
+			State.Mesh.Get(),
+			PreviousElapsedTime,
+			NewElapsedTime,
+			EffectiveDeltaTime,
+			bHasRotationDelta,
+			RotationDelta);
+
 		if (AddDisplacement.ContainsNaN())
 		{
+			UE_LOG(LogAct, Warning, TEXT("Removing invalid AddMove. Owner=%s Handle=%d SyncId=%d ParamsSource=%d"),
+				*GetNameSafe(CharacterOwner),
+				Handle,
+				State.Params.SyncId,
+				static_cast<int32>(State.Params.SourceType));
 			HandlesToRemove.Add(Handle);
 			continue;
 		}
@@ -560,11 +914,10 @@ FVector UActCharacterMovementComponent::ConsumeAddMoveDisplacement(float DeltaSe
 	}
 
 	RemoveAddMoves(HandlesToRemove);
-
 	return TotalDisplacement;
 }
 
-float UActCharacterMovementComponent::EvaluateAddMoveScale(const FActAddMoveParams& Params, float ElapsedTime, float Duration) const
+float UActCharacterMovementComponent::EvaluateAddMoveScale(const FActAddMoveParams& Params, const float ElapsedTime, const float Duration) const
 {
 	if (Duration <= UE_SMALL_NUMBER)
 	{
@@ -589,7 +942,33 @@ float UActCharacterMovementComponent::EvaluateAddMoveScale(const FActAddMovePara
 	}
 }
 
-FVector UActCharacterMovementComponent::ResolveAddMoveDisplacement(const FActAddMoveParams& Params, USkeletalMeshComponent* Mesh, float PreviousElapsedTime, float NewElapsedTime, float DeltaSeconds, bool& bOutHasRotationDelta, FQuat& OutRotationDelta) const
+bool UActCharacterMovementComponent::DoesAddMovePassModeFilter(const FActAddMoveParams& Params) const
+{
+	switch (Params.ModeFilter)
+	{
+	case EActAddMoveModeFilter::Any:
+		return true;
+	case EActAddMoveModeFilter::GroundedOnly:
+		return IsMovingOnGround();
+	case EActAddMoveModeFilter::AirOnly:
+		return !IsMovingOnGround();
+	case EActAddMoveModeFilter::FallingOnly:
+		return MovementMode == MOVE_Falling;
+	case EActAddMoveModeFilter::WalkingOnly:
+		return MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking;
+	default:
+		return true;
+	}
+}
+
+FVector UActCharacterMovementComponent::ResolveAddMoveDisplacement(
+	const FActAddMoveParams& Params,
+	USkeletalMeshComponent* Mesh,
+	float PreviousElapsedTime,
+	float NewElapsedTime,
+	float DeltaSeconds,
+	bool& bOutHasRotationDelta,
+	FQuat& OutRotationDelta) const
 {
 	bOutHasRotationDelta = false;
 	OutRotationDelta = FQuat::Identity;
@@ -616,7 +995,14 @@ FVector UActCharacterMovementComponent::ResolveAddMoveDisplacement(const FActAdd
 			DeltaTransform.SetRotation(FQuat::Identity);
 		}
 
-		if (Params.bApplyRotation)
+		// Explicit gameplay-facing should win over extracted montage yaw when requested.
+		const bool bShouldApplyAddMoveRotation = Params.bApplyRotation && (!Params.bRespectAddMoveRotation || GetAddMoveRotationParams() == nullptr);
+		if (!bShouldApplyAddMoveRotation)
+		{
+			DeltaTransform.SetRotation(FQuat::Identity);
+		}
+
+		if (bShouldApplyAddMoveRotation)
 		{
 			bOutHasRotationDelta = !DeltaTransform.GetRotation().Equals(FQuat::Identity);
 			OutRotationDelta = DeltaTransform.GetRotation();
@@ -629,11 +1015,6 @@ FVector UActCharacterMovementComponent::ResolveAddMoveDisplacement(const FActAdd
 			DeltaTransform.SetTranslation(Translation);
 		}
 
-		// Convert animation root motion translation into world space.
-		//
-		// We use mesh yaw as basis when possible because many characters keep mesh rotated relative
-		// to the capsule (e.g. -90 yaw) for asset forward alignment. Using capsule yaw would make
-		// the extracted motion travel sideways for those setups.
 		FRotator BasisRotation = FRotator::ZeroRotator;
 		if (CharacterOwner && CharacterOwner->GetMesh())
 		{
@@ -666,7 +1047,7 @@ FTransform UActCharacterMovementComponent::GetAddMoveBasisTransform(const FActAd
 	}
 }
 
-int32 UActCharacterMovementComponent::AcquireAddMoveHandle(int32 ExistingHandle, int32 SyncId)
+int32 UActCharacterMovementComponent::AcquireAddMoveHandle(const int32 ExistingHandle, const int32 SyncId)
 {
 	if (ExistingHandle != INDEX_NONE)
 	{
@@ -675,7 +1056,7 @@ int32 UActCharacterMovementComponent::AcquireAddMoveHandle(int32 ExistingHandle,
 
 	if (SyncId != INDEX_NONE)
 	{
-		if (const int32* ExistingSyncHandle = VelocityAdditionMapBySyncId.Find(SyncId))
+		if (const int32* ExistingSyncHandle = AddMoveStateMapBySyncId.Find(SyncId))
 		{
 			return *ExistingSyncHandle;
 		}
@@ -684,58 +1065,9 @@ int32 UActCharacterMovementComponent::AcquireAddMoveHandle(int32 ExistingHandle,
 	return NextAddMoveHandle++;
 }
 
-void UActCharacterMovementComponent::RemoveAddMoveMappings(int32 Handle, const FActVelocityAdditionState* State)
-{
-	if (!State)
-	{
-		return;
-	}
-
-	if (USkeletalMeshComponent* Mesh = State->Mesh.Get())
-	{
-		VelocityAdditionMapByMesh.Remove(Mesh);
-	}
-
-	if (State->Params.SyncId != INDEX_NONE)
-	{
-		if (const int32* SyncHandle = VelocityAdditionMapBySyncId.Find(State->Params.SyncId); SyncHandle && *SyncHandle == Handle)
-		{
-			VelocityAdditionMapBySyncId.Remove(State->Params.SyncId);
-		}
-	}
-}
-
-void UActCharacterMovementComponent::RemoveAddMoves(const TArray<int32>& Handles)
-{
-	if (Handles.IsEmpty())
-	{
-		return;
-	}
-
-	bool bRemovedAny = false;
-	for (const int32 Handle : Handles)
-	{
-		if (Handle == INDEX_NONE)
-		{
-			continue;
-		}
-
-		RemoveAddMoveMappings(Handle, VelocityAdditionMap.Find(Handle));
-		bRemovedAny |= VelocityAdditionMap.Remove(Handle) > 0;
-	}
-
-	if (!bRemovedAny)
-	{
-		return;
-	}
-
-	++AddMoveStateRevision;
-	UpdateAddMoveNetworkCorrectionMode();
-}
-
 void UActCharacterMovementComponent::ApplyPendingAddMove(float DeltaSeconds)
 {
-	if (bApplyingAddMove || !UpdatedComponent || VelocityAdditionMap.IsEmpty() || DeltaSeconds <= UE_SMALL_NUMBER)
+	if (bApplyingAddMove || !UpdatedComponent || AddMoveStateMap.IsEmpty() || DeltaSeconds <= UE_SMALL_NUMBER)
 	{
 		PendingAddMoveDisplacement = FVector::ZeroVector;
 		PendingAddMoveRotationDelta = FQuat::Identity;
@@ -755,7 +1087,6 @@ void UActCharacterMovementComponent::ApplyPendingAddMove(float DeltaSeconds)
 	const FQuat NewRotation = PendingAddMoveRotationDelta * UpdatedComponent->GetComponentQuat();
 	FHitResult Hit;
 	bApplyingAddMove = true;
-	// Apply displacement using safe movement so collisions resolve deterministically across prediction/replay.
 	SafeMoveUpdatedComponent(PendingAddMoveDisplacement, NewRotation.Rotator(), true, Hit);
 	bApplyingAddMove = false;
 	if (Hit.IsValidBlockingHit())
@@ -767,19 +1098,70 @@ void UActCharacterMovementComponent::ApplyPendingAddMove(float DeltaSeconds)
 	PendingAddMoveRotationDelta = FQuat::Identity;
 }
 
+void UActCharacterMovementComponent::RemoveAddMoveMappings(const int32 Handle, const FActAddMoveState* State)
+{
+	if (!State)
+	{
+		return;
+	}
+
+	if (USkeletalMeshComponent* Mesh = State->Mesh.Get())
+	{
+		AddMoveStateMapByMesh.Remove(Mesh);
+	}
+
+	if (State->Params.SyncId != INDEX_NONE)
+	{
+		if (const int32* SyncHandle = AddMoveStateMapBySyncId.Find(State->Params.SyncId); SyncHandle && *SyncHandle == Handle)
+		{
+			AddMoveStateMapBySyncId.Remove(State->Params.SyncId);
+		}
+	}
+}
+
+void UActCharacterMovementComponent::RemoveAddMoves(const TArray<int32>& Handles)
+{
+	if (Handles.IsEmpty())
+	{
+		return;
+	}
+
+	bool bRemovedAny = false;
+	for (const int32 Handle : Handles)
+	{
+		if (Handle == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const FActAddMoveState* State = AddMoveStateMap.Find(Handle);
+		RemoveAddMoveMappings(Handle, State);
+		bRemovedAny |= AddMoveStateMap.Remove(Handle) > 0;
+	}
+
+	if (!bRemovedAny)
+	{
+		return;
+	}
+
+	++AddMoveStateRevision;
+	UpdateAddMoveNetworkCorrectionMode();
+}
+
 void UActCharacterMovementComponent::CaptureAddMoveSnapshots(TArray<FActAddMoveSnapshot, TInlineAllocator<4>>& OutSnapshots) const
 {
 	OutSnapshots.Reset();
-	OutSnapshots.Reserve(VelocityAdditionMap.Num());
+	OutSnapshots.Reserve(AddMoveStateMap.Num());
 
-	for (const TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
+	for (const TPair<int32, FActAddMoveState>& Pair : AddMoveStateMap)
 	{
-		const FActVelocityAdditionState& State = Pair.Value;
+		const FActAddMoveState& State = Pair.Value;
 		FActAddMoveSnapshot& Snapshot = OutSnapshots.AddDefaulted_GetRef();
 		Snapshot.LocalHandle = Pair.Key;
 		Snapshot.SyncId = State.Params.SyncId;
 		Snapshot.Params = State.Params;
 		Snapshot.ElapsedTime = State.ElapsedTime;
+		Snapshot.bPaused = State.PauseLockCount > 0;
 	}
 }
 
@@ -797,7 +1179,9 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 			FMath::IsNearlyEqual(A.StartTrackPosition, B.StartTrackPosition) &&
 			FMath::IsNearlyEqual(A.EndTrackPosition, B.EndTrackPosition) &&
 			A.bApplyRotation == B.bApplyRotation &&
+			A.bRespectAddMoveRotation == B.bRespectAddMoveRotation &&
 			A.bIgnoreZAccumulate == B.bIgnoreZAccumulate &&
+			A.ModeFilter == B.ModeFilter &&
 			A.SyncId == B.SyncId;
 	};
 
@@ -818,10 +1202,10 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 	}
 
 	TArray<int32> HandlesToRemove;
-	HandlesToRemove.Reserve(VelocityAdditionMap.Num());
-	for (const TPair<int32, FActVelocityAdditionState>& Pair : VelocityAdditionMap)
+	HandlesToRemove.Reserve(AddMoveStateMap.Num());
+	for (const TPair<int32, FActAddMoveState>& Pair : AddMoveStateMap)
 	{
-		const FActVelocityAdditionState& State = Pair.Value;
+		const FActAddMoveState& State = Pair.Value;
 		const bool bTrackBySyncId = State.Params.SyncId != INDEX_NONE;
 		const bool bTrackByHandle = !bTrackBySyncId && !bNetworkSynchronizedOnly;
 		if ((bTrackBySyncId && !IncomingSyncIds.Contains(State.Params.SyncId)) ||
@@ -831,12 +1215,8 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 		}
 	}
 
-	// Phase 1: remove any local AddMove entries that do not exist in incoming snapshot set.
-	// This keeps both sides in sync and prevents "ghost" motion continuing after prediction is corrected.
 	RemoveAddMoves(HandlesToRemove);
 
-	// Phase 2: add/update incoming entries.
-	// If SyncId matches, we update in-place (stable identity across section refresh / branch changes).
 	bool bChanged = false;
 	for (const FActAddMoveSnapshot& Snapshot : Snapshots)
 	{
@@ -847,11 +1227,12 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 				continue;
 			}
 
-			if (const int32* ExistingSyncHandle = VelocityAdditionMapBySyncId.Find(Snapshot.SyncId))
+			if (const int32* ExistingSyncHandle = AddMoveStateMapBySyncId.Find(Snapshot.SyncId))
 			{
-				if (FActVelocityAdditionState* State = VelocityAdditionMap.Find(*ExistingSyncHandle))
+				if (FActAddMoveState* State = AddMoveStateMap.Find(*ExistingSyncHandle))
 				{
 					State->ElapsedTime = Snapshot.ElapsedTime;
+					State->PauseLockCount = Snapshot.bPaused ? 1 : 0;
 					bChanged = true;
 				}
 			}
@@ -862,27 +1243,28 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 		int32 ExistingHandle = INDEX_NONE;
 		if (Snapshot.SyncId != INDEX_NONE)
 		{
-			if (const int32* ExistingSyncHandle = VelocityAdditionMapBySyncId.Find(Snapshot.SyncId))
+			if (const int32* ExistingSyncHandle = AddMoveStateMapBySyncId.Find(Snapshot.SyncId))
 			{
 				ExistingHandle = *ExistingSyncHandle;
 			}
 		}
-		else if (!bNetworkSynchronizedOnly)
+		else
 		{
 			ExistingHandle = Snapshot.LocalHandle;
 		}
 
 		int32 Handle = ExistingHandle;
-		FActVelocityAdditionState* ExistingState = ExistingHandle != INDEX_NONE ? VelocityAdditionMap.Find(ExistingHandle) : nullptr;
+		FActAddMoveState* ExistingState = ExistingHandle != INDEX_NONE ? AddMoveStateMap.Find(ExistingHandle) : nullptr;
 		if (!ExistingState || !AreAddMoveParamsEquivalent(ExistingState->Params, Snapshot.Params))
 		{
-			Handle = SetAddMoveInternal(Snapshot.Params, nullptr, ExistingHandle);
-			ExistingState = VelocityAdditionMap.Find(Handle);
+			Handle = SetAddMoveInternal(Snapshot.Params, nullptr, ExistingHandle, false);
+			ExistingState = AddMoveStateMap.Find(Handle);
 		}
 
-		if (FActVelocityAdditionState* State = ExistingState)
+		if (FActAddMoveState* State = ExistingState)
 		{
 			State->ElapsedTime = Snapshot.ElapsedTime;
+			State->PauseLockCount = Snapshot.bPaused ? 1 : 0;
 			bChanged = true;
 		}
 	}
@@ -895,7 +1277,7 @@ void UActCharacterMovementComponent::RestoreAddMoveSnapshots(const TArray<FActAd
 
 void UActCharacterMovementComponent::UpdateAddMoveNetworkCorrectionMode()
 {
-	const bool bHasAddMove = !VelocityAdditionMap.IsEmpty();
+	const bool bHasAddMove = !AddMoveStateMap.IsEmpty();
 	if (bHasAddMove == bAddMoveNetworkCorrectionOverrideActive)
 	{
 		return;
@@ -903,10 +1285,6 @@ void UActCharacterMovementComponent::UpdateAddMoveNetworkCorrectionMode()
 
 	if (bHasAddMove)
 	{
-		// During authored combat motion we prefer "smoothness" over micro-corrections.
-		// We temporarily relax correction rules while AddMove is active to avoid jitter cascades.
-		// (The more complete solution is full move-data alignment via SavedMove snapshots above;
-		// this flagging is an extra guardrail.)
 		bCachedIgnoreClientMovementErrorChecksAndCorrection = bIgnoreClientMovementErrorChecksAndCorrection;
 		bCachedServerAcceptClientAuthoritativePosition = bServerAcceptClientAuthoritativePosition;
 		bIgnoreClientMovementErrorChecksAndCorrection = true;
@@ -915,8 +1293,58 @@ void UActCharacterMovementComponent::UpdateAddMoveNetworkCorrectionMode()
 		return;
 	}
 
-	// Restore original correction settings when combat motion ends.
 	bIgnoreClientMovementErrorChecksAndCorrection = bCachedIgnoreClientMovementErrorChecksAndCorrection;
 	bServerAcceptClientAuthoritativePosition = bCachedServerAcceptClientAuthoritativePosition;
 	bAddMoveNetworkCorrectionOverrideActive = false;
+}
+
+void UActCharacterMovementComponent::SetAddMoveRotationInternal(const FActAddMoveRotationParams& Params, const bool bBroadcastToSimulatedProxies)
+{
+	if (!Params.IsValidRequest())
+	{
+		ClearAddMoveRotationInternal(bBroadcastToSimulatedProxies);
+		return;
+	}
+
+	AddMoveRotationParams = Params;
+	if (AddMoveRotationParams.SourceType == EActAddMoveRotationSourceType::Direction)
+	{
+		AddMoveRotationParams.Direction.Z = 0.0f;
+		AddMoveRotationParams.Direction = AddMoveRotationParams.Direction.GetSafeNormal();
+	}
+
+	if (bBroadcastToSimulatedProxies)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			ActCharacter->MulticastSetAddMoveRotation(AddMoveRotationParams);
+			ActCharacter->ForceNetUpdate();
+		}
+	}
+}
+
+void UActCharacterMovementComponent::ClearAddMoveRotationInternal(const bool bBroadcastToSimulatedProxies)
+{
+	const bool bHadRotation = GetAddMoveRotationParams() != nullptr;
+	AddMoveRotationParams = FActAddMoveRotationParams();
+
+	if (bHadRotation && bBroadcastToSimulatedProxies)
+	{
+		if (AActCharacter* ActCharacter = CharacterOwner ? Cast<AActCharacter>(CharacterOwner) : nullptr; ActCharacter && ActCharacter->HasAuthority())
+		{
+			ActCharacter->MulticastClearAddMoveRotation();
+			ActCharacter->ForceNetUpdate();
+		}
+	}
+}
+
+void UActCharacterMovementComponent::RefreshMovementStateParamsFromStack()
+{
+	if (MovementStateStack.IsEmpty())
+	{
+		ResetMovementStateParams();
+		return;
+	}
+
+	ApplyMovementStateParams(MovementStateStack.Last().Params);
 }

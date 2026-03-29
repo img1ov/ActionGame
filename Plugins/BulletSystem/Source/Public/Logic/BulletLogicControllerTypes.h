@@ -33,10 +33,10 @@ public:
 		bOutSuccess = true;
 
 		bool bTagSuccess = true;
-		HitReactImpulse.HitReactTag.NetSerialize(Ar, Map, bTagSuccess);
+		HitReactImpulse.Tag.NetSerialize(Ar, Map, bTagSuccess);
 		bOutSuccess &= bTagSuccess;
 
-		Ar << HitReactImpulse.ImpulseVector;
+		Ar << HitReactImpulse.Direction;
 		Ar << HitReactImpulse.Strength;
 
 		return bOutSuccess;

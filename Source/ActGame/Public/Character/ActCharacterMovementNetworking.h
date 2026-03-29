@@ -17,7 +17,7 @@ class UActCharacterMovementComponent;
  */
 struct FActAddMoveSnapshot
 {
-	/** Local handle in UActCharacterMovementComponent::VelocityAdditionMap (not network stable). */
+	/** Local handle in UActCharacterMovementComponent::AddMoveStateMap (not network stable). */
 	int32 LocalHandle = INDEX_NONE;
 
 	/** Stable identity used for network alignment (must be non-INDEX_NONE to replicate). */
@@ -28,6 +28,9 @@ struct FActAddMoveSnapshot
 
 	/** Elapsed time (seconds) inside the authored duration. */
 	float ElapsedTime = 0.0f;
+
+	/** Runtime pause state for this AddMove snapshot. */
+	bool bPaused = false;
 
 	/** True if this snapshot should participate in network synchronization. */
 	bool HasNetworkIdentity() const
