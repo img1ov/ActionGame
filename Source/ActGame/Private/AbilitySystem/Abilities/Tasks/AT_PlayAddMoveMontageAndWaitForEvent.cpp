@@ -330,7 +330,7 @@ void UAT_PlayAddMoveMontageAndWaitForEvent::OnDestroy(const bool bInOwnerFinishe
 		{
 			if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(Character->GetCharacterMovement()))
 			{
-				ActMovementComponent->StopAddMove(AddMoveHandle);
+				ActMovementComponent->StopMotion(AddMoveHandle);
 			}
 			AddMoveHandle = INDEX_NONE;
 		}
@@ -423,7 +423,7 @@ bool UAT_PlayAddMoveMontageAndWaitForEvent::RefreshPredictedAddMoveForSection(co
 	{
 		if (AddMoveHandle != INDEX_NONE)
 		{
-			AddMoveComponent->StopAddMove(AddMoveHandle);
+			AddMoveComponent->StopMotion(AddMoveHandle);
 			AddMoveHandle = INDEX_NONE;
 		}
 
@@ -447,14 +447,17 @@ bool UAT_PlayAddMoveMontageAndWaitForEvent::RefreshPredictedAddMoveForSection(co
 		AddMoveComponent->StopMovementImmediately();
 	}
 
-	AddMoveHandle = AddMoveComponent->SetAddMoveFromRootMotionRange(
+	AddMoveHandle = AddMoveComponent->ApplyRootMotionMotion(
 		MontageToPlay,
 		MotionStartTrackPosition,
 		MotionEndTrackPosition,
 		ExtractedDuration,
+		AddMoveSettings.BasisMode,
 		AddMoveSettings.bApplyRotation,
 		AddMoveSettings.bRespectAddMoveRotation,
 		AddMoveSettings.bIgnoreZAccumulate,
+		FActMotionRotationParams(),
+		EActMotionProvenance::OwnerPredicted,
 		AddMoveHandle,
 		GetOrCreateAddMoveSyncId());
 

@@ -17,15 +17,15 @@ class UAbilitySystemComponent;
 
 namespace
 {
-    FVector BuildHitReactImpulseFromAttackerSpace(
-        const FVector& LocalImpulse,
+    FVector BuildHitReactStrengthScaleFromAttackerSpace(
+        const FVector& LocalStrengthScale,
         const AActor* SourceActor,
         const AActor* TargetActor,
         const FHitResult& TargetHit)
     {
-        if (LocalImpulse.IsNearlyZero() || !SourceActor || !TargetActor)
+        if (LocalStrengthScale.IsNearlyZero() || !SourceActor || !TargetActor)
         {
-            return LocalImpulse;
+            return LocalStrengthScale;
         }
 
         FVector TargetPosition = TargetHit.ImpactPoint;
@@ -44,7 +44,7 @@ namespace
 
         if (AwayFromAttacker.IsNearlyZero())
         {
-            return LocalImpulse;
+            return LocalStrengthScale;
         }
 
         AwayFromAttacker.Normalize();
@@ -54,7 +54,7 @@ namespace
             Right = SourceActor->GetActorRightVector();
         }
 
-        return Right * LocalImpulse.X + AwayFromAttacker * LocalImpulse.Y + FVector::UpVector * LocalImpulse.Z;
+        return Right * LocalStrengthScale.X + AwayFromAttacker * LocalStrengthScale.Y + FVector::UpVector * LocalStrengthScale.Z;
     }
 }
 
@@ -303,7 +303,7 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 				FHitReactImpulse HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
 				if (HitReactImpulse.Tag.IsValid())
 				{
-					HitReactImpulse.Direction = BuildHitReactImpulseFromAttackerSpace(
+					HitReactImpulse.Direction = BuildHitReactStrengthScaleFromAttackerSpace(
 						HitReactImpulse.Direction,
 						SourceActor,
 						TargetActor,

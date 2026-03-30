@@ -99,4 +99,8 @@ public:
 	// HitReact helpers (GAS GameplayEvent payload).
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|HitReact")
 	static bool GetHitReactImpulseFromEventData(const FGameplayEventData& EventData, FHitReactImpulse& OutHitReactImpulse);
+
+	// Converts the hit-react strength scale into the world-space velocity vector expected by AddMove.
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "BulletSystem|HitReact")
+	static FVector GetHitReactAddMoveWorldVelocity(const FHitReactImpulse& HitReactImpulse);
 };

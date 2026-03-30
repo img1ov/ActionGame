@@ -9,7 +9,6 @@
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
-#include "Misc/Crc.h"
 #include "TimerManager.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AT_ApplyAddMove)
@@ -22,20 +21,45 @@ UAT_ApplyAddMove::UAT_ApplyAddMove(const FObjectInitializer& ObjectInitializer)
 UAT_ApplyAddMove* UAT_ApplyAddMove::ApplyAddMove(
 	UGameplayAbility* OwningAbility,
 	const FName TaskInstanceName,
-	const EActAddMoveSpace InSpace,
+	const EActMotionBasisMode InBasisMode,
 	FVector InDirection,
 	const float InStrength,
 	float InDuration,
+	const EActMotionProvenance InProvenance,
 	UCurveFloat* InStrengthOverTime,
 	USkeletalMeshComponent* InMesh)
 {
 	UAbilitySystemGlobals::NonShipping_ApplyGlobalAbilityScaler_Duration(InDuration);
 
 	UAT_ApplyAddMove* Task = NewAbilityTask<UAT_ApplyAddMove>(OwningAbility, TaskInstanceName);
-	Task->Space = InSpace;
+	Task->BasisMode = InBasisMode;
 	Task->Direction = InDirection.GetSafeNormal();
 	Task->Strength = InStrength;
 	Task->Duration = InDuration;
+	Task->Provenance = InProvenance;
+	Task->StrengthOverTime = InStrengthOverTime;
+	Task->Mesh = InMesh;
+	return Task;
+}
+
+UAT_ApplyAddMove* UAT_ApplyAddMove::ApplyAddMoveVelocity(
+	UGameplayAbility* OwningAbility,
+	const FName TaskInstanceName,
+	const EActMotionBasisMode InBasisMode,
+	const FVector InVelocity,
+	float InDuration,
+	const EActMotionProvenance InProvenance,
+	UCurveFloat* InStrengthOverTime,
+	USkeletalMeshComponent* InMesh)
+{
+	UAbilitySystemGlobals::NonShipping_ApplyGlobalAbilityScaler_Duration(InDuration);
+
+	UAT_ApplyAddMove* Task = NewAbilityTask<UAT_ApplyAddMove>(OwningAbility, TaskInstanceName);
+	Task->BasisMode = InBasisMode;
+	Task->Direction = InVelocity.GetSafeNormal();
+	Task->Strength = InVelocity.Size();
+	Task->Duration = InDuration;
+	Task->Provenance = InProvenance;
 	Task->StrengthOverTime = InStrengthOverTime;
 	Task->Mesh = InMesh;
 	return Task;
@@ -84,7 +108,7 @@ void UAT_ApplyAddMove::OnDestroy(const bool bInOwnerFinished)
 	{
 		if (UActCharacterMovementComponent* MovementComponent = GetActMovementComponent())
 		{
-			MovementComponent->StopAddMove(AddMoveHandle);
+			MovementComponent->StopMotion(AddMoveHandle);
 		}
 
 		AddMoveHandle = INDEX_NONE;
@@ -96,8 +120,8 @@ void UAT_ApplyAddMove::OnDestroy(const bool bInOwnerFinished)
 FString UAT_ApplyAddMove::GetDebugString() const
 {
 	return FString::Printf(
-		TEXT("ApplyAddMove. Space=%d Direction=%s Strength=%.2f Duration=%.2f Handle=%d"),
-		static_cast<int32>(Space),
+		TEXT("ApplyAddMove. BasisMode=%d Direction=%s Strength=%.2f Duration=%.2f Handle=%d"),
+		static_cast<int32>(BasisMode),
 		*Direction.ToString(),
 		Strength,
 		Duration,
@@ -106,8 +130,7 @@ FString UAT_ApplyAddMove::GetDebugString() const
 
 UActCharacterMovementComponent* UAT_ApplyAddMove::GetActMovementComponent() const
 {
-	const ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
-	return Character ? Cast<UActCharacterMovementComponent>(Character->GetCharacterMovement()) : nullptr;
+	return UActCharacterMovementComponent::ResolveActMovementComponent(GetAvatarActor());
 }
 
 USkeletalMeshComponent* UAT_ApplyAddMove::ResolveMeshBasis() const
@@ -144,24 +167,19 @@ bool UAT_ApplyAddMove::ApplyAuthoredAddMove()
 	}
 
 	const FVector Velocity = Direction * Strength;
-	const EActAddMoveCurveType CurveType = StrengthOverTime ? EActAddMoveCurveType::CustomCurve : EActAddMoveCurveType::Constant;
+	const EActMotionCurveType CurveType = StrengthOverTime ? EActMotionCurveType::CustomCurve : EActMotionCurveType::Constant;
 	const int32 SyncId = ShouldUseNetworkSyncId() ? GetOrCreateAddMoveSyncId() : INDEX_NONE;
 
-	switch (Space)
-	{
-	case EActAddMoveSpace::World:
-		AddMoveHandle = MovementComponent->SetAddMoveWorld(Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
-		break;
-	case EActAddMoveSpace::Actor:
-		AddMoveHandle = MovementComponent->SetAddMove(Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
-		break;
-	case EActAddMoveSpace::Mesh:
-		AddMoveHandle = MovementComponent->SetAddMoveWithMesh(ResolveMeshBasis(), Velocity, Duration, CurveType, StrengthOverTime, INDEX_NONE, SyncId);
-		break;
-	default:
-		AddMoveHandle = INDEX_NONE;
-		break;
-	}
+	FActMotionParams Params;
+	Params.SourceType = EActMotionSourceType::Velocity;
+	Params.BasisMode = BasisMode;
+	Params.Velocity = Velocity;
+	Params.Duration = Duration;
+	Params.CurveType = CurveType;
+	Params.Curve = StrengthOverTime;
+	Params.Provenance = Provenance;
+	Params.SyncId = SyncId;
+	AddMoveHandle = MovementComponent->ApplyMotion(Params, ResolveMeshBasis(), INDEX_NONE);
 
 	if (AddMoveHandle == INDEX_NONE)
 	{
@@ -191,12 +209,7 @@ void UAT_ApplyAddMove::OnTimeFinish()
 
 bool UAT_ApplyAddMove::ShouldUseNetworkSyncId() const
 {
-	if (!Ability)
-	{
-		return false;
-	}
-
-	return Ability->GetNetExecutionPolicy() != EGameplayAbilityNetExecutionPolicy::LocalOnly;
+	return UActCharacterMovementComponent::ShouldUseMotionNetworkSync(Ability, Provenance);
 }
 
 int32 UAT_ApplyAddMove::GetOrCreateAddMoveSyncId() const
@@ -206,19 +219,6 @@ int32 UAT_ApplyAddMove::GetOrCreateAddMoveSyncId() const
 		return AddMoveSyncId;
 	}
 
-	uint32 Hash = GetTypeHash(InstanceName);
-	if (Ability)
-	{
-		Hash = HashCombine(Hash, GetTypeHash(Ability->GetClass()));
-		Hash = HashCombine(Hash, FCrc::StrCrc32(*Ability->GetCurrentAbilitySpecHandle().ToString()));
-		Hash = HashCombine(Hash, ::GetTypeHash(Ability->GetCurrentActivationInfo().GetActivationPredictionKey().Current));
-	}
-
-	AddMoveSyncId = static_cast<int32>(Hash & 0x7fffffff);
-	if (AddMoveSyncId == INDEX_NONE)
-	{
-		AddMoveSyncId = FCrc::StrCrc32(TEXT("ApplyAddMoveSync"));
-	}
-
+	AddMoveSyncId = UActCharacterMovementComponent::BuildStableMotionSyncId(InstanceName, Ability, TEXT("ApplyAddMoveSync"));
 	return AddMoveSyncId;
 }

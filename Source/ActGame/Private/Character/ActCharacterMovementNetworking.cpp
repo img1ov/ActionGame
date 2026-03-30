@@ -1,20 +1,20 @@
 #include "Character/ActCharacterMovementNetworking.h"
 
-#include "Animation/AnimMontage.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "GameFramework/Character.h"
 
 namespace
 {
-bool SerializeAddMoveSnapshot(FArchive& Ar, UPackageMap* PackageMap, FActAddMoveSnapshot& Snapshot)
+bool SerializeMotionSnapshot(FArchive& Ar, UPackageMap* PackageMap, FActPredictedMotionSnapshot& Snapshot)
 {
 	(void)PackageMap;
-	// Packed movement moves have a hard bit cap. Static authored parameters are not serialized here;
-	// bootstrap + local task execution create the same SyncId-backed AddMove locally.
-	// Movement RPCs keep runtime state synchronized.
 	Ar << Snapshot.SyncId;
 	Ar << Snapshot.ElapsedTime;
-	Ar.SerializeBits(&Snapshot.bPaused, 1);
+	Ar << Snapshot.RotationElapsedTime;
+	Ar << Snapshot.FrozenBasisYawDegrees;
+	Ar << Snapshot.FrozenFacingDirection;
+	Ar.SerializeBits(&Snapshot.bRotationCompleted, 1);
+	Ar.SerializeBits(&Snapshot.bRootMotionRotationSuppressed, 1);
 	Snapshot.Params.SyncId = Snapshot.SyncId;
 	return true;
 }
@@ -24,16 +24,14 @@ void FActCharacterNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Ch
 {
 	Super::ClientFillNetworkMoveData(ClientMove, MoveType);
 
-	AddMoveSnapshots.Reset();
+	MotionSnapshots.Reset();
 	if (const FActSavedMove_Character* ActMove = static_cast<const FActSavedMove_Character*>(&ClientMove))
 	{
-		// Only replicate snapshots that have SyncId.
-		// Local-only AddMove entries are still replayed client-side but do not affect server simulation.
-		for (const FActAddMoveSnapshot& Snapshot : ActMove->AddMoveSnapshots)
+		for (const FActPredictedMotionSnapshot& Snapshot : ActMove->MotionSnapshots)
 		{
 			if (Snapshot.HasNetworkIdentity())
 			{
-				AddMoveSnapshots.Add(Snapshot);
+				MotionSnapshots.Add(Snapshot);
 			}
 		}
 	}
@@ -46,31 +44,31 @@ bool FActCharacterNetworkMoveData::Serialize(UCharacterMovementComponent& Charac
 		return false;
 	}
 
-	uint8 SnapshotCount = static_cast<uint8>(FMath::Min(AddMoveSnapshots.Num(), 255));
+	uint8 SnapshotCount = static_cast<uint8>(FMath::Min(MotionSnapshots.Num(), 255));
 	Ar << SnapshotCount;
 
 	if (Ar.IsLoading())
 	{
-		AddMoveSnapshots.Reset();
-		AddMoveSnapshots.Reserve(SnapshotCount);
+		MotionSnapshots.Reset();
+		MotionSnapshots.Reserve(SnapshotCount);
 	}
 
 	for (uint8 SnapshotIndex = 0; SnapshotIndex < SnapshotCount; ++SnapshotIndex)
 	{
-		FActAddMoveSnapshot Snapshot;
+		FActPredictedMotionSnapshot Snapshot;
 		if (!Ar.IsLoading())
 		{
-			Snapshot = AddMoveSnapshots[SnapshotIndex];
+			Snapshot = MotionSnapshots[SnapshotIndex];
 		}
 
-		if (!SerializeAddMoveSnapshot(Ar, PackageMap, Snapshot))
+		if (!SerializeMotionSnapshot(Ar, PackageMap, Snapshot))
 		{
 			return false;
 		}
 
 		if (Ar.IsLoading())
 		{
-			AddMoveSnapshots.Add(Snapshot);
+			MotionSnapshots.Add(Snapshot);
 		}
 	}
 
@@ -79,16 +77,16 @@ bool FActCharacterNetworkMoveData::Serialize(UCharacterMovementComponent& Charac
 
 FActCharacterNetworkMoveDataContainer::FActCharacterNetworkMoveDataContainer()
 {
-	NewMoveData = &ActMoveData[0];
-	PendingMoveData = &ActMoveData[1];
-	OldMoveData = &ActMoveData[2];
+	NewMoveData = &MoveData[0];
+	PendingMoveData = &MoveData[1];
+	OldMoveData = &MoveData[2];
 }
 
 void FActSavedMove_Character::Clear()
 {
 	Super::Clear();
-	AddMoveStateRevision = 0;
-	AddMoveSnapshots.Reset();
+	MotionStateRevision = 0;
+	MotionSnapshots.Reset();
 }
 
 void FActSavedMove_Character::SetMoveFor(ACharacter* C, float InDeltaTime, const FVector& NewAccel, FNetworkPredictionData_Client_Character& ClientData)
@@ -97,8 +95,8 @@ void FActSavedMove_Character::SetMoveFor(ACharacter* C, float InDeltaTime, const
 
 	if (const UActCharacterMovementComponent* ActMovement = C ? Cast<UActCharacterMovementComponent>(C->GetCharacterMovement()) : nullptr)
 	{
-		AddMoveStateRevision = ActMovement->GetAddMoveStateRevision();
-		ActMovement->CaptureAddMoveSnapshots(AddMoveSnapshots);
+		MotionStateRevision = ActMovement->GetMotionStateRevision();
+		ActMovement->CapturePredictedMotionSnapshots(MotionSnapshots);
 	}
 }
 
@@ -108,7 +106,7 @@ void FActSavedMove_Character::PrepMoveFor(ACharacter* C)
 
 	if (UActCharacterMovementComponent* ActMovement = C ? Cast<UActCharacterMovementComponent>(C->GetCharacterMovement()) : nullptr)
 	{
-		ActMovement->RestoreAddMoveSnapshots(AddMoveSnapshots, false);
+		ActMovement->RestorePredictedMotionSnapshots(MotionSnapshots, false);
 	}
 }
 
@@ -120,7 +118,7 @@ bool FActSavedMove_Character::CanCombineWith(const FSavedMovePtr& NewMove, AChar
 	}
 
 	const FActSavedMove_Character* ActNewMove = static_cast<const FActSavedMove_Character*>(NewMove.Get());
-	return ActNewMove && AddMoveStateRevision == ActNewMove->AddMoveStateRevision;
+	return ActNewMove && MotionStateRevision == ActNewMove->MotionStateRevision;
 }
 
 FActNetworkPredictionData_Client_Character::FActNetworkPredictionData_Client_Character(const UCharacterMovementComponent& ClientMovement)

@@ -36,8 +36,23 @@ public:
 		HitReactImpulse.Tag.NetSerialize(Ar, Map, bTagSuccess);
 		bOutSuccess &= bTagSuccess;
 
+		uint8 VisualDirectionValue = static_cast<uint8>(HitReactImpulse.VisualDirection);
+		Ar << VisualDirectionValue;
+		if (Ar.IsLoading())
+		{
+			HitReactImpulse.VisualDirection = static_cast<EImpactDirection>(VisualDirectionValue);
+		}
+
 		Ar << HitReactImpulse.Direction;
 		Ar << HitReactImpulse.Strength;
+		Ar << HitReactImpulse.Duration;
+
+		UObject* StrengthCurveObject = HitReactImpulse.StrengthCurve.Get();
+		Ar << StrengthCurveObject;
+		if (Ar.IsLoading())
+		{
+			HitReactImpulse.StrengthCurve = Cast<UCurveFloat>(StrengthCurveObject);
+		}
 
 		return bOutSuccess;
 	}

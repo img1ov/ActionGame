@@ -128,9 +128,11 @@ struct FHitReactImpulse
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     EImpactDirection VisualDirection;
 
-    // Impulse direction/amount in attacker-relative space:
+    // Axis strength scale in attacker-relative space:
     // +Y = away from attacker, +X = attacker-right, +Z = world up.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
+    // This is not normalized. Final procedural AddMove world velocity should be:
+    //   StrengthScaleInWorld * Strength
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact", meta = (DisplayName = "StrengthScale"))
     FVector Direction = FVector::ZeroVector;
 
     // Primary strength used for scaling / montage selection / convenience (also mirrored into EventData.EventMagnitude).

@@ -36,9 +36,13 @@ struct FActAddMoveMontageSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Add Move", meta = (EditCondition = "RangeMode == EActAddMoveMontageRangeMode::ThroughSection"))
 	FName EndSectionName = NAME_None;
 
+	/** Basis used to convert extracted root motion into world-space displacement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Add Move")
+	EActMotionBasisMode BasisMode = EActMotionBasisMode::MeshStartFrozen;
+
 	/** Whether extracted root-motion rotation should also become AddMove rotation delta. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Add Move")
-	bool bApplyRotation = true;
+	bool bApplyRotation = false;
 
 	/** Whether explicit gameplay rotation AddMove should win over extracted root-motion yaw. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Add Move")

@@ -37,7 +37,7 @@ public:
 	 * @param EventTags Any gameplay events matching this tag will activate the EventReceived callback. If empty, all events will trigger callback
 	 * @param Rate Change to play the montage faster or slower
 	 * @param bStopWhenAbilityEnds If true, this montage will be aborted if the ability ends normally. It is always stopped when the ability is explicitly cancelled
-	 * @param AnimRootMotionTranslationScale Change to modify size of root motion or set to 0 to block it entirely
+	 * @param AnimRootMotionTranslationScale Pure playback defaults to 0 so authored AnimRootMotion does not leak into procedural motion flows
 	 */
 	UFUNCTION(BlueprintCallable, Category="Ability|Tasks", meta = (DisplayName = "PlayMontageAndWaitForEvent", HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
 	static UAT_PlayMontageAndWaitForEvent* CreatePlayMontageAndWaitForEvent(
@@ -48,7 +48,7 @@ public:
 		float Rate = 1.f,
 		FName StartSection = NAME_None,
 		bool bStopWhenAbilityEnds = true,
-		float AnimRootMotionTranslationScale = 1.f
+		float AnimRootMotionTranslationScale = 0.f
 	);
 	
 	virtual void Activate() override;

@@ -39,10 +39,23 @@ public:
 	static UAT_ApplyAddMove* ApplyAddMove(
 		UGameplayAbility* OwningAbility,
 		FName TaskInstanceName,
-		EActAddMoveSpace Space,
+		EActMotionBasisMode BasisMode,
 		FVector Direction,
 		float Strength,
 		float Duration,
+		EActMotionProvenance Provenance = EActMotionProvenance::OwnerPredicted,
+		UCurveFloat* StrengthOverTime = nullptr,
+		USkeletalMeshComponent* Mesh = nullptr);
+
+	/** Convenience overload for gameplay that already resolved the final authored velocity. */
+	UFUNCTION(BlueprintCallable, Category="Ability|Tasks", meta = (DisplayName = "ApplyAddMoveVelocity", HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
+	static UAT_ApplyAddMove* ApplyAddMoveVelocity(
+		UGameplayAbility* OwningAbility,
+		FName TaskInstanceName,
+		EActMotionBasisMode BasisMode,
+		FVector Velocity,
+		float Duration,
+		EActMotionProvenance Provenance = EActMotionProvenance::OwnerPredicted,
 		UCurveFloat* StrengthOverTime = nullptr,
 		USkeletalMeshComponent* Mesh = nullptr);
 
@@ -67,9 +80,9 @@ private:
 	int32 GetOrCreateAddMoveSyncId() const;
 
 private:
-	/** Coordinate space used to interpret Direction. */
+	/** Basis used to transform authored translation. */
 	UPROPERTY()
-	EActAddMoveSpace Space = EActAddMoveSpace::World;
+	EActMotionBasisMode BasisMode = EActMotionBasisMode::World;
 
 	/** Authored motion direction, normalized at task creation time. */
 	UPROPERTY()
@@ -82,6 +95,9 @@ private:
 	/** Authored duration in seconds; < 0 means persistent until stopped. */
 	UPROPERTY()
 	float Duration = 0.0f;
+
+	UPROPERTY()
+	EActMotionProvenance Provenance = EActMotionProvenance::OwnerPredicted;
 
 	/** Optional scalar profile sampled over normalized AddMove lifetime. */
 	UPROPERTY()

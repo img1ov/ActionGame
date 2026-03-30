@@ -365,9 +365,15 @@ void UActHeroComponent::PushMovementInputBlock(UObject* Source)
 		return;
 	}
 
+	const bool bWasBlocked = IsMovementInputBlocked();
 	TWeakObjectPtr<UObject> SourceKey(Source);
 	int32& RefCount = MovementInputBlockSources.FindOrAdd(SourceKey);
 	RefCount = FMath::Max(0, RefCount) + 1;
+
+	if (!bWasBlocked)
+	{
+		FlushPendingMovementInput(false);
+	}
 }
 
 void UActHeroComponent::PopMovementInputBlock(UObject* Source)
@@ -377,6 +383,7 @@ void UActHeroComponent::PopMovementInputBlock(UObject* Source)
 		return;
 	}
 
+	const bool bWasBlocked = IsMovementInputBlocked();
 	const TWeakObjectPtr<UObject> SourceKey(Source);
 	if (int32* RefCount = MovementInputBlockSources.Find(SourceKey))
 	{
@@ -388,17 +395,34 @@ void UActHeroComponent::PopMovementInputBlock(UObject* Source)
 	}
 
 	PruneMovementInputBlockSources();
+
+	if (bWasBlocked && !IsMovementInputBlocked())
+	{
+		FlushPendingMovementInput(true);
+	}
 }
 
 void UActHeroComponent::ClearMovementInputBlocks()
 {
 	MovementInputBlockSources.Reset();
+	FlushPendingMovementInput(true);
 }
 
 bool UActHeroComponent::IsMovementInputBlocked() const
 {
 	PruneMovementInputBlockSources();
 	return !MovementInputBlockSources.IsEmpty();
+}
+
+void UActHeroComponent::FlushPendingMovementInput(const bool bSuppressNextFrame)
+{
+	MoveInputVector = FVector2D::ZeroVector;
+	bSuppressMovementInputUntilNextSample = bSuppressNextFrame;
+
+	if (APawn* Pawn = GetPawn<APawn>())
+	{
+		Pawn->ConsumeMovementInputVector();
+	}
 }
 
 void UActHeroComponent::PruneMovementInputBlockSources() const
@@ -488,19 +512,24 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 	}
 
 	const FVector2D Value = MoveInputVector;
+	const bool bSuppressMovementInputThisSample = bSuppressMovementInputUntilNextSample;
+	bSuppressMovementInputUntilNextSample = false;
 
 	const FRotator ControlRot(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FVector WorldMoveVector = ControlRot.RotateVector(FVector(Value.Y, Value.X, 0.f));
 	const bool bMovementInputBlocked = IsMovementInputBlocked();
 	const bool bHasMeaningfulMoveInput = !Value.IsNearlyZero();
+	const bool bShouldApplyMovementInput =
+		!bMovementInputBlocked &&
+		!bSuppressMovementInputThisSample;
 
-	if (!bMovementInputBlocked && Value.X != 0.f)
+	if (bShouldApplyMovementInput && Value.X != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::RightVector);
 		Pawn->AddMovementInput(MovementDirection, Value.X);
 	}
 
-	if (!bMovementInputBlocked && Value.Y != 0.f)
+	if (bShouldApplyMovementInput && Value.Y != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::ForwardVector);
 		Pawn->AddMovementInput(MovementDirection, Value.Y);

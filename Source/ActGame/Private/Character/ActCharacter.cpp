@@ -28,6 +28,8 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = false;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	SetNetUpdateFrequency(120.0f);
+	SetMinNetUpdateFrequency(60.0f);
 
 	SetNetCullDistanceSquared(900000000.f);
 
@@ -199,6 +201,7 @@ void AActCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME_CONDITION(ThisClass, ReplicatedAcceleration, COND_SimulatedOnly);
+	DOREPLIFETIME(ThisClass, ReplicatedMotions);
 	DOREPLIFETIME(ThisClass, MyTeamID);
 }
 
@@ -289,12 +292,23 @@ void AActCharacter::FastSharedReplication_Implementation(const FSharedRepMovemen
 			GetCharacterMovement()->bNetworkUpdateReceived = true;
 		}
 
-		// Location, Rotation, Velocity, etc.
-		FRepMovement& MutableRepMovement = GetReplicatedMovement_Mutable();
-		MutableRepMovement = SharedRepMovement.RepMovement;
+		const FVector ServerLocation = FRepMovement::RebaseOntoLocalOrigin(SharedRepMovement.RepMovement.Location, this);
+		UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent();
+		const bool bSuppressSharedReplication = ActMovementComponent && ActMovementComponent->ShouldSuppressSharedReplication(ServerLocation);
 
-		// This also sets LastRepMovement
-		OnRep_ReplicatedMovement();
+		if (!bSuppressSharedReplication)
+		{
+			// Location, Rotation, Velocity, etc.
+			FRepMovement& MutableRepMovement = GetReplicatedMovement_Mutable();
+			MutableRepMovement = SharedRepMovement.RepMovement;
+
+			// This also sets LastRepMovement
+			OnRep_ReplicatedMovement();
+		}
+		else if (ActMovementComponent)
+		{
+			ActMovementComponent->ApplySuppressedSharedReplication(ServerLocation, SharedRepMovement.RepMovement.LinearVelocity);
+		}
 
 		// Jump force
 		SetProxyIsJumpForceApplied(SharedRepMovement.bProxyIsJumpForceApplied);
@@ -308,81 +322,20 @@ void AActCharacter::FastSharedReplication_Implementation(const FSharedRepMovemen
 	}
 }
 
-void AActCharacter::MulticastBootstrapAddMove_Implementation(const FActAddMoveParams& Params)
+void AActCharacter::RefreshReplicatedMotionStateFromMovement()
 {
-	if (HasAuthority())
+	if (!HasAuthority())
 	{
 		return;
 	}
 
 	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
 	{
-		ActMovementComponent->ApplyReplicatedAddMove(Params);
+		ActMovementComponent->BuildReplicatedMotionEntries(ReplicatedMotions);
 	}
-}
-
-void AActCharacter::MulticastStopAddMove_Implementation(const int32 SyncId)
-{
-	if (HasAuthority())
+	else
 	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->StopReplicatedAddMove(SyncId);
-	}
-}
-
-void AActCharacter::MulticastPauseAddMove_Implementation(const int32 SyncId)
-{
-	if (HasAuthority())
-	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->PauseReplicatedAddMove(SyncId);
-	}
-}
-
-void AActCharacter::MulticastResumeAddMove_Implementation(const int32 SyncId)
-{
-	if (HasAuthority())
-	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->ResumeReplicatedAddMove(SyncId);
-	}
-}
-
-void AActCharacter::MulticastSetAddMoveRotation_Implementation(const FActAddMoveRotationParams& Params)
-{
-	if (HasAuthority())
-	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->ApplyReplicatedAddMoveRotation(Params);
-	}
-}
-
-void AActCharacter::MulticastClearAddMoveRotation_Implementation()
-{
-	if (HasAuthority())
-	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->ClearReplicatedAddMoveRotation();
+		ReplicatedMotions.Reset();
 	}
 }
 
@@ -438,6 +391,14 @@ void AActCharacter::OnRep_ReplicatedAcceleration()
 		UnpackedAcceleration.Z = double(ReplicatedAcceleration.AccelZ) * MaxAccel / 127.0; // [-127, 127] -> [-MaxAccel, MaxAccel]
 
 		ActMovementComponent->SetReplicatedAcceleration(UnpackedAcceleration);
+	}
+}
+
+void AActCharacter::OnRep_ReplicatedMotions()
+{
+	if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		ActMovementComponent->SyncReplicatedMotions(ReplicatedMotions);
 	}
 }
 
@@ -660,6 +621,8 @@ bool AActCharacter::CanJumpInternal_Implementation() const
 FSharedRepMovement::FSharedRepMovement()
 {
 	RepMovement.LocationQuantizationLevel = EVectorQuantization::RoundTwoDecimals;
+	RepMovement.VelocityQuantizationLevel = EVectorQuantization::RoundTwoDecimals;
+	RepMovement.RotationQuantizationLevel = ERotatorQuantization::ShortComponents;
 }
 
 bool FSharedRepMovement::FillForCharacter(ACharacter* Character)

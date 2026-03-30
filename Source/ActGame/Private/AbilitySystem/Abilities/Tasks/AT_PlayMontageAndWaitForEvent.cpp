@@ -14,6 +14,7 @@ UAT_PlayMontageAndWaitForEvent::UAT_PlayMontageAndWaitForEvent(const FObjectInit
 {
 	Rate = 1.f;
 	bStopWhenAbilityEnds = true;
+	AnimRootMotionTranslationScale = 0.f;
 }
 
 UAT_PlayMontageAndWaitForEvent* UAT_PlayMontageAndWaitForEvent::CreatePlayMontageAndWaitForEvent(
@@ -206,13 +207,10 @@ void UAT_PlayMontageAndWaitForEvent::OnMontageBlendingOut(UAnimMontage* Montage,
 		{
 			OnInterrupted.Broadcast(FGameplayTag(), FGameplayEventData());
 		}
-		else
-		{
-			if (ShouldBroadcastAbilityTaskDelegates())
-			{
-				OnBlendOut.Broadcast(FGameplayTag(), FGameplayEventData());
-			}
-		}
+	}
+	else if (ShouldBroadcastAbilityTaskDelegates())
+	{
+		OnBlendOut.Broadcast(FGameplayTag(), FGameplayEventData());
 	}
 }
 

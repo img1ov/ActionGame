@@ -140,35 +140,12 @@ public:
 	/** RPCs that is called on frames when default property replication is skipped. This replicates a single movement update to everyone. */
 	UFUNCTION(NetMulticast, unreliable)
 	UE_API void FastSharedReplication(const FSharedRepMovement& SharedRepMovement);
-
-	/** Reliable cosmetic bootstrap for SyncId-backed AddMove so simulated proxies start the same authored motion immediately. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastBootstrapAddMove(const FActAddMoveParams& Params);
-
-	/** Reliable stop for one SyncId-backed AddMove. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastStopAddMove(int32 SyncId);
-
-	/** Reliable pause for one SyncId-backed AddMove. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastPauseAddMove(int32 SyncId);
-
-	/** Reliable resume for one SyncId-backed AddMove. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastResumeAddMove(int32 SyncId);
-
-	/** Reliable bootstrap for explicit rotation AddMove authored on the server. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastSetAddMoveRotation(const FActAddMoveRotationParams& Params);
-
-	/** Reliable clear for explicit rotation AddMove authored on the server. */
-	UFUNCTION(NetMulticast, Reliable)
-	UE_API void MulticastClearAddMoveRotation();
 	
 	// Last FSharedRepMovement we sent, to avoid sending repeatedly.
 	FSharedRepMovement LastSharedReplication;
 	
 	virtual bool UpdateSharedReplication();
+	UE_API void RefreshReplicatedMotionStateFromMovement();
 
 protected:
 
@@ -233,6 +210,9 @@ private:
 	
 	UPROPERTY(Transient, ReplicatedUsing = OnRep_ReplicatedAcceleration)
 	FActReplicatedAcceleration ReplicatedAcceleration;
+
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedMotions)
+	TArray<FActReplicatedMotion> ReplicatedMotions;
 	
 	UPROPERTY(ReplicatedUsing = OnRep_MyTeamID)
 	FGenericTeamId MyTeamID;
@@ -256,6 +236,9 @@ private:
 	
 	UFUNCTION()
 	UE_API void OnRep_ReplicatedAcceleration();
+
+	UFUNCTION()
+	UE_API void OnRep_ReplicatedMotions();
 	
 	UFUNCTION()
 	UE_API void OnRep_MyTeamID(FGenericTeamId OldTeamID);

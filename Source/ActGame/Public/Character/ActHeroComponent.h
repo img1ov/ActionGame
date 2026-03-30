@@ -168,6 +168,9 @@ protected:
 private:
 
 	void PruneMovementInputBlockSources() const;
+	void FlushPendingMovementInput(bool bSuppressNextFrame);
+
+	mutable bool bSuppressMovementInputUntilNextSample = false;
 };
 
 #undef UE_API
