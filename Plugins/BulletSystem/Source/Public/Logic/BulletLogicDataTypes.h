@@ -26,6 +26,11 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Create", meta = (ClampMin = "0"))
     float SpreadAngle = 10.0f;
+
+    // If true, created bullets are cleaned up when the source bullet is destroyed.
+    // Disable when the created bullet should continue on its own lifecycle.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Create")
+    bool bBindToParentLifetime = true;
 };
 
 UCLASS(BlueprintType)

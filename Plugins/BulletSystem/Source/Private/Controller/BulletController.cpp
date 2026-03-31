@@ -980,6 +980,7 @@ void UBulletController::RequestSummonChildren(const FBulletInfo& ParentInfo, EBu
         ActionInfo.InheritOwner = ChildData.bInheritOwner ? 1 : 0;
         ActionInfo.InheritTarget = ChildData.bInheritTarget ? 1 : 0;
         ActionInfo.InheritPayload = ChildData.bInheritPayload ? 1 : 0;
+        ActionInfo.BindToParentLifetime = ChildData.bBindToParentLifetime ? 1 : 0;
         EnqueueAction(ParentInfo.InstanceId, ActionInfo);
     }
 }
@@ -992,6 +993,7 @@ void UBulletController::SpawnChildBulletsFromLogic(
     int32 InheritOwnerOverride,
     int32 InheritTargetOverride,
     int32 InheritPayloadOverride,
+    int32 BindToParentLifetimeOverride,
     const FVector& SpawnLocationOffset,
     bool bSpawnLocationOffsetInSpawnSpace,
     const FRotator& SpawnRotationOffset) const
@@ -1013,8 +1015,9 @@ void UBulletController::SpawnChildBulletsFromLogic(
     const bool bInheritOwner = (InheritOwnerOverride >= 0) ? (InheritOwnerOverride != 0) : (MatchingChild ? MatchingChild->bInheritOwner : true);
     const bool bInheritTarget = (InheritTargetOverride >= 0) ? (InheritTargetOverride != 0) : (MatchingChild ? MatchingChild->bInheritTarget : true);
     const bool bInheritPayload = (InheritPayloadOverride >= 0) ? (InheritPayloadOverride != 0) : (MatchingChild ? MatchingChild->bInheritPayload : true);
+    const bool bBindToParentLifetime = (BindToParentLifetimeOverride >= 0) ? (BindToParentLifetimeOverride != 0) : (MatchingChild ? MatchingChild->bBindToParentLifetime : true);
     // Copy parent-derived params up front to avoid referencing ParentInfo after map mutations.
-    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity, bInheritOwner, bInheritTarget, bInheritPayload);
+    const FBulletInitParams BaseParams = BuildChildParams(ParentInfo, FTransform::Identity, bInheritOwner, bInheritTarget, bInheritPayload, bBindToParentLifetime);
 
     for (int32 Index = 0; Index < FinalCount; ++Index)
     {
@@ -1289,8 +1292,15 @@ void UBulletController::FlushDestroyedBullets() const
                     continue;
                 }
 
+                if (!ChildInfo->bBindToParentLifetime)
+                {
+                    Model->DetachChildFromParent(ChildInstanceId);
+                    continue;
+                }
+
                 if (ChildInfo->SpawnWorldTime >= Info->DestroyWorldTime)
                 {
+                    Model->DetachChildFromParent(ChildInstanceId);
                     continue;
                 }
 
@@ -1339,7 +1349,7 @@ void UBulletController::FlushDestroyedBullets() const
     }
 }
 
-FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const
+FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload, bool bBindToParentLifetime) const
 {
     FBulletInitParams Params;
     Params.Owner = bInheritOwner ? ParentInfo.InitParams.Owner : nullptr;
@@ -1351,6 +1361,7 @@ FBulletInitParams UBulletController::BuildChildParams(const FBulletInfo& ParentI
         Params.Payload = ParentInfo.InitParams.Payload;
     }
     Params.ParentInstanceId = ParentInfo.InstanceId;
+    Params.bBindToParentLifetime = bBindToParentLifetime;
     return Params;
 }
 

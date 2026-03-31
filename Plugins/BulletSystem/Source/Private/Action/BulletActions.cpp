@@ -356,6 +356,7 @@ void UBulletActionSummonBullet::Execute(UBulletController* InController, FBullet
         ActionInfo.InheritOwner,
         ActionInfo.InheritTarget,
         ActionInfo.InheritPayload,
+        ActionInfo.BindToParentLifetime,
         ActionInfo.SpawnLocationOffset,
         ActionInfo.bSpawnLocationOffsetInSpawnSpace,
         ActionInfo.SpawnRotationOffset);

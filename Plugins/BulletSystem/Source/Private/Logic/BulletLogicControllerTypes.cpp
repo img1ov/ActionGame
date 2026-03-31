@@ -78,6 +78,7 @@ void UBulletLogicCreateBulletController::OnHit(FBulletInfo& BulletInfo, const FH
     ActionInfo.ChildBulletId = CreateData->ChildBulletId;
     ActionInfo.SpawnCount = CreateData->Count;
     ActionInfo.SpreadAngle = CreateData->SpreadAngle;
+    ActionInfo.BindToParentLifetime = CreateData->bBindToParentLifetime ? 1 : 0;
     Controller->EnqueueAction(BulletInfo.InstanceId, ActionInfo);
 }
 

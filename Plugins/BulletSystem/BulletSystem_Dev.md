@@ -452,6 +452,7 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 - `bSpawnLocationOffsetInSpawnSpace`：偏移是否在 spawn transform 空间计算（否则按世界空间）
 - `SpawnRotationOffset`：生成旋转偏移
 - `bInheritOwner / bInheritTarget / bInheritPayload`：是否继承 Owner/Target/Payload（继承到 Child 的 `FBulletInitParams`）
+- `bBindToParentLifetime`：是否跟随 Parent 生命周期。默认 `true`；关闭后 Child 仍保留“由谁生成”的关系，但会按自己的生命周期独立存活/销毁。
 - 注意：如果 Parent 是通过 `OverrideConfig`（武器/技能专用配置资产）生成的，Child 会默认使用同一个配置资产来解析 `ChildBulletId`，避免因未注入配置导致“找不到子弹行”。
 
 #### 13.4.2 触发链路（OnCreate / OnHit / OnDestroy）
@@ -463,7 +464,9 @@ BulletSystem 的 Child 机制用于“子弹事件驱动的派生子弹”，典
 #### 13.4.3 继承与生命周期绑定（ParentInstanceId / Parent 清理）
 
 - Spawn 子弹时会通过 `BuildChildParams(...)` 把 `ParentInstanceId` 等写入 Child 的 `FBulletInitParams`，并按 `bInheritOwner / bInheritTarget / bInheritPayload` 决定是否继承对应字段。
-- 当 Parent 被销毁时，系统会在 `FlushDestroyedBullets()` 阶段清理“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控，避免出现“父弹死了但早先生成的子弹永远不清理”的悬挂状态。
+- `bBindToParentLifetime = true` 时：当 Parent 被销毁，系统会在 `FlushDestroyedBullets()` 阶段清理“已经存在的”子弹（会跳过那些在 parent destroy 时刻之后才生成的 child），保证父子弹生命周期关系可控。
+- `bBindToParentLifetime = false` 时：Child 不会被 Parent 销毁级联，而是继续走自己的生命周期；当 Parent 真正回收时，系统会自动解除这条父子引用，避免留下悬挂的 `ParentInstanceId` / 运行时映射。
+- 设计语义上，`ParentInstanceId` 表示“来源关系”，`bBindToParentLifetime` 表示“是否随父同生共死”，这两个概念是分开的，不要混用。
 
 ## 14. 碰撞与命中（最容易踩坑的部分）
 
@@ -651,6 +654,14 @@ HitBox profile 默认就是 Manual，适合“攻击帧结算”。
 
 - Child 默认会继承 Parent 的 Payload（用于“弹片同源伤害”等场景）
 - 如需阻断继承，在 `DataMain.Children` 对应条目里把 `bInheritPayload = false`
+- Child 默认也会继承 Parent 生命周期（`bBindToParentLifetime = true`）
+- 如需让 Child 独立存活，在 `DataMain.Children` 对应条目里把 `bBindToParentLifetime = false`
+
+逻辑生成子弹（`UBulletLogicDataCreateBullet`）的生命周期规则：
+
+- 该逻辑数据同样提供 `bBindToParentLifetime`
+- 默认 `true`：逻辑生成出的子弹会随触发它的源 bullet 一起清理
+- 设为 `false`：逻辑生成出的子弹改为独立生命周期，只保留来源关系，不接受父弹销毁级联
 
 设计约束：
 

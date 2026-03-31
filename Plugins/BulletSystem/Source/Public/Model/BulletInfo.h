@@ -244,6 +244,10 @@ struct FBulletInfo
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     int32 ParentInstanceId = INDEX_NONE;
 
+    // If true, this child is auto-destroyed when its parent is destroyed.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
+    bool bBindToParentLifetime = true;
+
     // World time when destroy action was triggered (used for parent-child lifecycle binding).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Info")
     float DestroyWorldTime = -1.0f;

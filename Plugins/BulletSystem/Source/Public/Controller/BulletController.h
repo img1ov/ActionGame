@@ -83,6 +83,7 @@ public:
         int32 InheritOwnerOverride = -1,
         int32 InheritTargetOverride = -1,
         int32 InheritPayloadOverride = -1,
+        int32 BindToParentLifetimeOverride = -1,
         const FVector& SpawnLocationOffset = FVector::ZeroVector,
         bool bSpawnLocationOffsetInSpawnSpace = true,
         const FRotator& SpawnRotationOffset = FRotator::ZeroRotator) const;
@@ -109,7 +110,7 @@ private:
     // Perform a collision query for manual-hit processing and return the current hit candidates.
     void CollectManualHitCandidates(FBulletInfo& Info, TArray<FHitResult>& OutHits) const;
     // Build child init params (owner/target/payload inheritance).
-    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload) const;
+    FBulletInitParams BuildChildParams(const FBulletInfo& ParentInfo, const FTransform& ChildTransform, bool bInheritOwner, bool bInheritTarget, bool bInheritPayload, bool bBindToParentLifetime) const;
     const FBulletDataChild* FindChildEntry(const FBulletInfo& ParentInfo, FName ChildBulletId) const;
 
     UPROPERTY()

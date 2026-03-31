@@ -19,6 +19,7 @@ FBulletInfo* UBulletModel::SpawnBullet(UBulletPool* Pool, const FBulletInitParam
     Info.bIsSimple = Config.CheckSimpleBullet();
     Info.SpawnWorldTime = 0.0f;
     Info.ParentInstanceId = InitParams.ParentInstanceId;
+    Info.bBindToParentLifetime = InitParams.bBindToParentLifetime;
     Info.DestroyWorldTime = -1.0f;
     Info.Size = FVector::OneVector;
 
@@ -98,6 +99,17 @@ int32 UBulletModel::GetParentInstanceId(int32 ChildInstanceId) const
         return *ParentId;
     }
     return INDEX_NONE;
+}
+
+void UBulletModel::DetachChildFromParent(int32 ChildInstanceId)
+{
+    if (FBulletInfo* ChildInfo = BulletMap.Find(ChildInstanceId))
+    {
+        ChildInfo->ParentInstanceId = INDEX_NONE;
+        ChildInfo->bBindToParentLifetime = false;
+    }
+
+    UnregisterChild(ChildInstanceId);
 }
 
 void UBulletModel::RemoveBullet(int32 InstanceId)

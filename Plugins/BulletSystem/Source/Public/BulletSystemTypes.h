@@ -435,6 +435,10 @@ struct FBulletDataChild
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bInheritPayload = true;
 
+    /** If true, child is auto-destroyed when its parent is destroyed. Disable to let the child run its own lifecycle. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
+    bool bBindToParentLifetime = true;
+
     /** If true, spawn these children when the parent bullet is destroyed. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Children")
     bool bSpawnOnDestroy = false;
@@ -649,6 +653,11 @@ struct FBulletInitParams
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
     int32 ParentInstanceId = INDEX_NONE;
 
+    // If true, this bullet will be cleaned up automatically when ParentInstanceId is destroyed.
+    // If false, the parent relationship is kept for bookkeeping only and the bullet owns its lifetime.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
+    bool bBindToParentLifetime = true;
+
     // Optional per-instance key used for runtime lookup (e.g. AnimNotify spawn -> later process/destroy by name).
     // This is a local runtime label and is not used by BulletSystem core simulation.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
@@ -704,4 +713,8 @@ struct FBulletActionInfo
     // Controls whether child inherits InitParams.Payload.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
     int32 InheritPayload = -1;
+
+    // Optional parent lifetime binding override for SummonBullet actions (-1 = use config or default true).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    int32 BindToParentLifetime = -1;
 };

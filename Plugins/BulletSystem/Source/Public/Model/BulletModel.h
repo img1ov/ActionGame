@@ -30,6 +30,7 @@ public:
     // Parent/child bullet relationship tracking.
     void GetChildBullets(int32 ParentInstanceId, TArray<int32>& OutChildren) const;
     int32 GetParentInstanceId(int32 ChildInstanceId) const;
+    void DetachChildFromParent(int32 ChildInstanceId);
 
     void RemoveBullet(int32 InstanceId);
     void Clear();
@@ -56,4 +57,3 @@ private:
     // Monotonic id generator. Starts at 1 (0/INDEX_NONE reserved).
     int32 NextInstanceId = 1;
 };
-
