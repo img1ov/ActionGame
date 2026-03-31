@@ -9,6 +9,7 @@
 class APawn;
 class UActInputCommandConfig;
 class UActInputConfig;
+class UActComboGraphConfig;
 class UActAbilityTagRelationshipMapping;
 class UActAbilitySet;
 class UBulletConfig;
@@ -37,6 +38,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Input")
 	TObjectPtr<UActInputCommandConfig> InputCommandConfig;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Combat")
+	TObjectPtr<UActComboGraphConfig> ComboGraphConfig;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Act|Bullet")
 	TObjectPtr<UBulletConfig> BulletConfig;

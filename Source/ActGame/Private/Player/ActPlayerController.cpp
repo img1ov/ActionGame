@@ -311,10 +311,6 @@ void AActPlayerController::ConfigureInputCommandDefinitions(const TArray<FInputC
 	{
 		CommandResolver->Reset();
 	}
-	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponent())
-	{
-		ActASC->ResetAbilityChainRuntime();
-	}
 	PendingAbilityInputPressed.Reset();
 	PendingAbilityInputReleased.Reset();
 	ActiveAbilityInputTagLastSeenTimes.Reset();
@@ -465,14 +461,6 @@ void AActPlayerController::BroadcastOnPlayerStateChanged()
 void AActPlayerController::OnPlayerStateChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam)
 {
 	ConditionalBroadcastTeamChanged(this, IntegerToGenericTeamId(OldTeam), IntegerToGenericTeamId(NewTeam));
-}
-
-void AActPlayerController::ClearAbilityChainCache()
-{
-	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponent())
-	{
-		ActASC->ResetAbilityChainRuntime();
-	}
 }
 
 void AActPlayerController::OnPlayerStateChanged()

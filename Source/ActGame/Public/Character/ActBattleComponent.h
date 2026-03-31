@@ -4,20 +4,17 @@
 
 #include "Components/PawnComponent.h"
 #include "Engine/EngineTypes.h"
-#include "NativeGameplayTags.h"
 
 #include "ActBattleComponent.generated.h"
 
 #define UE_API ACTGAME_API
 
 class AActor;
-
-// Tag used by strafe-move style abilities (e.g. hold-to-lock-on).
-ACTGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Movement_StrafeMove);
 /**
  * Component that centralizes battle-related state and routing.
  * Responsibilities:
- * - Lock-on selection/replication (long-lived combat target).
+ * - Lock-on request state.
+ * - Lock-on target selection/replication.
  *
  * Deliberately does not own temporary movement/rotation warp tasks. Those belong to CharacterMovement
  * so they can stay as low-level execution primitives instead of battle-layer semantics.
@@ -41,17 +38,24 @@ public:
 
 	/** Returns a valid target or clears the lock-on if invalid/out of range. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Act|Battle")
-	UE_API AActor* GetLockOnTarget();
+	UE_API AActor* GetLockOnTarget() const;
 
 	UFUNCTION(BlueprintPure, Category = "Act|Battle")
-	bool IsLockOnActive() const { return CurrentLockOnTarget != nullptr; }
+	bool IsLockOnRequested() const { return bLockOnRequested; }
+
+	UFUNCTION(BlueprintPure, Category = "Act|Battle")
+	bool HasLockOnTarget() const { return CurrentLockOnTarget != nullptr; }
 
 protected:
 	
 	virtual void OnRegister() override;
+	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	bool ShouldEvaluateLockOn() const;
+	void UpdateLockOnTickState();
+	void RefreshLockOnTarget();
 	AActor* FindLockOnTarget() const;
 	AActor* FindLockOnTargetByCameraTrace() const;
 	AActor* FindLockOnTargetByProximity() const;
@@ -61,10 +65,11 @@ private:
 	bool IsTargetInRange(const AActor* Target, float MaxDistance) const;
 	bool ShouldClearLockOnTarget(const AActor* Target) const;
 
+	void SetLockOnRequested(bool bRequested);
 	void SetLockOnTarget(AActor* NewTarget);
 
 	UFUNCTION(Server, Reliable)
-	void ServerSetLockOnTarget(AActor* NewTarget);
+	void ServerSetLockOnRequested(bool bRequested);
 
 	UFUNCTION()
 	void OnRep_LockOnTarget(AActor* OldTarget);
@@ -79,8 +84,14 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Act|Battle", meta = (AllowPrivateAccess = "true", ClampMin = "0"))
 	float LockOnRange;
 
+	/** Search cadence for reacquiring / validating lock-on targets while the request is active. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Act|Battle", meta = (AllowPrivateAccess = "true", ClampMin = "0.01"))
+	float LockOnRefreshInterval;
+
 	UPROPERTY(ReplicatedUsing = OnRep_LockOnTarget)
 	TObjectPtr<AActor> CurrentLockOnTarget;
+
+	bool bLockOnRequested = false;
 };
 
 #undef UE_API

@@ -18,18 +18,18 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ActBattleComponent)
 
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Movement_StrafeMove, "Event.Movement.StrafeMove", "Strafe-move state (e.g. lock-on hold).");
-
 UActBattleComponent::UActBattleComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
-	PrimaryComponentTick.bCanEverTick = false;
 
 	SetIsReplicatedByDefault(true);
 
 	TargetCollisionChannel = ECC_Pawn;
 	LockOnRange = 1500.0f;
+	LockOnRefreshInterval = 0.15f;
+	PrimaryComponentTick.TickInterval = LockOnRefreshInterval;
 }
 
 void UActBattleComponent::OnRegister()
@@ -38,6 +38,7 @@ void UActBattleComponent::OnRegister()
 
 	const APawn* Pawn = GetPawn<APawn>();
 	ensureAlwaysMsgf((Pawn != nullptr), TEXT("ActBattleComponent on [%s] can only be added to Pawn actors."), *GetNameSafe(GetOwner()));
+	UpdateLockOnTickState();
 }
 
 void UActBattleComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -55,37 +56,12 @@ void UActBattleComponent::StartLockOnTarget()
 		return;
 	}
 
-	// Authority owns the final target selection, but local control can set immediately for responsiveness.
-	const bool bIsAuthority = Pawn->HasAuthority();
-	const bool bIsLocallyControlled = Pawn->IsLocallyControlled();
-	const bool bIsBotControlled = Pawn->IsBotControlled();
-	// Remote pawns on the server should not clear/select; wait for the client's RPC.
-	if (bIsAuthority && !bIsLocallyControlled && !bIsBotControlled)
-	{
-		return;
-	}
+	SetLockOnRequested(true);
+	RefreshLockOnTarget();
 
-	AActor* NewTarget = nullptr;
-	if (bIsLocallyControlled || bIsBotControlled)
+	if (!Pawn->HasAuthority() && Pawn->IsLocallyControlled())
 	{
-		NewTarget = FindLockOnTarget();
-	}
-
-	// Reacquisition should be non-destructive. If the current target is still valid and we fail to
-	// find a better candidate this frame, keep the existing lock instead of momentarily clearing it.
-	if (!NewTarget && !ShouldClearLockOnTarget(CurrentLockOnTarget))
-	{
-		NewTarget = CurrentLockOnTarget;
-	}
-
-	if (bIsAuthority)
-	{
-		SetLockOnTarget(NewTarget);
-	}
-	else if (bIsLocallyControlled)
-	{
-		SetLockOnTarget(NewTarget);
-		ServerSetLockOnTarget(NewTarget);
+		ServerSetLockOnRequested(true);
 	}
 }
 
@@ -97,36 +73,75 @@ void UActBattleComponent::StopLockOnTarget()
 		return;
 	}
 
-	if (Pawn->HasAuthority())
+	SetLockOnRequested(false);
+	SetLockOnTarget(nullptr);
+
+	if (!Pawn->HasAuthority() && Pawn->IsLocallyControlled())
 	{
-		SetLockOnTarget(nullptr);
-	}
-	else if (Pawn->IsLocallyControlled())
-	{
-		SetLockOnTarget(nullptr);
-		ServerSetLockOnTarget(nullptr);
+		ServerSetLockOnRequested(false);
 	}
 }
 
-void UActBattleComponent::ServerSetLockOnTarget_Implementation(AActor* NewTarget)
+void UActBattleComponent::TickComponent(const float DeltaTime, const ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	if (!NewTarget)
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (!bLockOnRequested)
 	{
-		SetLockOnTarget(nullptr);
 		return;
 	}
 
-	if (!IsValidBattleTarget(NewTarget))
+	RefreshLockOnTarget();
+}
+
+bool UActBattleComponent::ShouldEvaluateLockOn() const
+{
+	const APawn* Pawn = GetPawn<APawn>();
+	if (!Pawn)
+	{
+		return false;
+	}
+
+	return Pawn->HasAuthority() || Pawn->IsLocallyControlled() || Pawn->IsBotControlled();
+}
+
+void UActBattleComponent::UpdateLockOnTickState()
+{
+	SetComponentTickEnabled(bLockOnRequested && ShouldEvaluateLockOn());
+}
+
+void UActBattleComponent::RefreshLockOnTarget()
+{
+	if (!bLockOnRequested || !ShouldEvaluateLockOn())
+	{
+		return;
+	}
+
+	// Lock-on is long-lived combat state. Keep the current target while valid, only reacquiring
+	// when it is missing or no longer usable.
+	AActor* NewTarget = CurrentLockOnTarget;
+	if (ShouldClearLockOnTarget(NewTarget))
 	{
 		NewTarget = nullptr;
 	}
 
-	if (NewTarget && !IsTargetInRange(NewTarget, LockOnRange))
+	if (!NewTarget)
 	{
-		NewTarget = nullptr;
+		NewTarget = FindLockOnTarget();
 	}
 
 	SetLockOnTarget(NewTarget);
+}
+
+void UActBattleComponent::SetLockOnRequested(const bool bRequested)
+{
+	if (bLockOnRequested == bRequested)
+	{
+		return;
+	}
+
+	bLockOnRequested = bRequested;
+	UpdateLockOnTickState();
 }
 
 void UActBattleComponent::SetLockOnTarget(AActor* NewTarget)
@@ -148,11 +163,23 @@ void UActBattleComponent::SetLockOnTarget(AActor* NewTarget)
 	}
 }
 
+void UActBattleComponent::ServerSetLockOnRequested_Implementation(const bool bRequested)
+{
+	SetLockOnRequested(bRequested);
+	if (!bLockOnRequested)
+	{
+		SetLockOnTarget(nullptr);
+		return;
+	}
+
+	RefreshLockOnTarget();
+}
+
 void UActBattleComponent::OnRep_LockOnTarget(AActor* OldTarget)
 {
 }
 
-AActor* UActBattleComponent::GetLockOnTarget()
+AActor* UActBattleComponent::GetLockOnTarget() const
 {
 	return ShouldClearLockOnTarget(CurrentLockOnTarget) ? nullptr : CurrentLockOnTarget;
 }
@@ -170,7 +197,13 @@ AActor* UActBattleComponent::FindLockOnTarget() const
 AActor* UActBattleComponent::FindLockOnTargetByCameraTrace() const
 {
 	const APawn* Pawn = GetPawn<APawn>();
-	if (!Pawn || !Pawn->IsLocallyControlled())
+	if (!Pawn)
+	{
+		return nullptr;
+	}
+
+	const bool bUseCameraTrace = Pawn->IsLocallyControlled() && !Pawn->IsBotControlled();
+	if (!bUseCameraTrace)
 	{
 		return nullptr;
 	}

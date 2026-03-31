@@ -6,7 +6,6 @@
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilityTagRelationshipMapping.h"
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
-#include "AbilitySystem/AbilityChain/ActAbilityChainRuntime.h"
 #include "Abilities/GameplayAbility.h"
 #include "Abilities/GameplayAbilityRepAnimMontage.h"
 #include "Animation/ActAnimInstance.h"
@@ -41,7 +40,6 @@ FString GetAbilityDebugName(const UGameplayAbility* Ability)
 UActAbilitySystemComponent::UActAbilitySystemComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	AbilityChainRuntime = MakeUnique<FActAbilityChainRuntime>();
 	SetMontageRepAnimPositionMethod(ERepAnimPositionMethod::CurrentSectionId);
 }
 
@@ -55,94 +53,12 @@ void UActAbilitySystemComponent::InitAbilityActorInfo(AActor* InOwnerActor, AAct
 	
 	Super::InitAbilityActorInfo(InOwnerActor, InAvatarActor);
 
-	ResetAbilityChainRuntime();
 	SetMontageRepAnimPositionMethod(ERepAnimPositionMethod::CurrentSectionId);
 
 	if (UActAnimInstance* ActAnimInst = Cast<UActAnimInstance>(ActorInfo->GetAnimInstance()))
 	{
 		ActAnimInst->InitializeWithAbilitySystem(this);
 	}
-}
-
-void UActAbilitySystemComponent::ResetAbilityChainRuntime()
-{
-	if (AbilityChainRuntime.IsValid())
-	{
-		AbilityChainRuntime->Reset();
-	}
-}
-
-bool UActAbilitySystemComponent::HasActiveAbilityChain() const
-{
-	return AbilityChainRuntime.IsValid() && AbilityChainRuntime->HasActiveChain(*this);
-}
-
-bool UActAbilitySystemComponent::CanActivateAbilityForChain(const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const
-{
-	return !AbilityChainRuntime.IsValid() || AbilityChainRuntime->CanActivateAbility(*this, Ability, OptionalRelevantTags);
-}
-
-void UActAbilitySystemComponent::BeginAbilityChain(UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
-{
-	if (AbilityChainRuntime.IsValid())
-	{
-		AbilityChainRuntime->BeginAbility(*this, Ability, SpecHandle);
-	}
-}
-
-void UActAbilitySystemComponent::EndAbilityChain(const UActGameplayAbility& Ability, const FGameplayAbilitySpecHandle SpecHandle)
-{
-	if (AbilityChainRuntime.IsValid())
-	{
-		AbilityChainRuntime->EndAbility(*this, Ability, SpecHandle);
-	}
-}
-
-void UActAbilitySystemComponent::OpenAbilityChainWindow(const FActAbilityChainWindowDefinition& WindowDefinition)
-{
-	if (AbilityChainRuntime.IsValid())
-	{
-		AbilityChainRuntime->OpenWindow(*this, WindowDefinition);
-	}
-}
-
-void UActAbilitySystemComponent::CloseAbilityChainWindow(const FName WindowId)
-{
-	if (AbilityChainRuntime.IsValid())
-	{
-		AbilityChainRuntime->CloseWindow(*this, WindowId);
-	}
-}
-
-FActAbilityChainCommandResolveResult UActAbilitySystemComponent::ResolveAbilityChainCommand(const FGameplayTag& CommandTag)
-{
-	if (!AbilityChainRuntime.IsValid())
-	{
-		return FActAbilityChainCommandResolveResult();
-	}
-
-	return AbilityChainRuntime->ResolveCommand(*this, CommandTag);
-}
-
-bool UActAbilitySystemComponent::AuthorizePredictedAbilityChainActivation(const FActAbilityChainActivationRequest& Request)
-{
-	if (!Request.IsValid() || !AbilityChainRuntime.IsValid())
-	{
-		return false;
-	}
-
-	const bool bAuthorizedLocally = AbilityChainRuntime->AuthorizePredictedActivation(*this, Request);
-	if (!bAuthorizedLocally)
-	{
-		return false;
-	}
-
-	if (ShouldForwardAbilityChainAuthorizationToServer())
-	{
-		ServerAuthorizeAbilityChainActivation(Request);
-	}
-
-	return true;
 }
 
 void UActAbilitySystemComponent::CancelAbilitiesByFunc(const TShouldCancelAbilityFunc& ShouldCancelFunc, const bool bReplicateCancelAbility)
@@ -834,16 +750,6 @@ void UActAbilitySystemComponent::ClientActivateAbilityFailed_Implementation(FGam
 	Super::ClientActivateAbilityFailed_Implementation(AbilityToActivate, PredictionKey);
 }
 
-void UActAbilitySystemComponent::ServerAuthorizeAbilityChainActivation_Implementation(const FActAbilityChainActivationRequest& Request)
-{
-	AuthorizePredictedAbilityChainActivation(Request);
-}
-
-bool UActAbilitySystemComponent::ShouldForwardAbilityChainAuthorizationToServer() const
-{
-	return AbilityActorInfo.IsValid() && AbilityActorInfo->IsLocallyControlled() && !AbilityActorInfo->IsNetAuthority();
-}
-
 bool UActAbilitySystemComponent::ShouldPreserveClientAbilityPresentationOnActivationFailure(const FGameplayAbilitySpec* AbilitySpec) const
 {
 	if (!AbilityActorInfo.IsValid() || !AbilityActorInfo->IsLocallyControlled() || AbilityActorInfo->IsNetAuthority())
@@ -964,34 +870,17 @@ void UActAbilitySystemComponent::NotifyAbilityActivated(const FGameplayAbilitySp
 
 void UActAbilitySystemComponent::NotifyAbilityFailed(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability, const FGameplayTagContainer& FailureReason)
 {
-	NotifyAbilityChainActivationFailed(Ability);
-
-	UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] Activate failed notify. Owner=%s Handle=%s Ability=%s Reasons=%s Local=%d Auth=%d Time=%.3f"),
+	UE_LOG(LogActAbilitySystem, Warning, TEXT("[BattleAbility] Activate failed notify. Owner=%s Handle=%s Ability=%s Reasons=%s Num=%d Local=%d Auth=%d Time=%.3f"),
 		*GetASCActorName(this),
 		*Handle.ToString(),
 		*GetAbilityDebugName(Ability),
 		*FailureReason.ToString(),
+		FailureReason.Num(),
 		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsLocallyControlled() : 0,
 		AbilityActorInfo.IsValid() ? AbilityActorInfo->IsNetAuthority() : 0,
 		GetASCLogTimeSeconds(this));
 
 	Super::NotifyAbilityFailed(Handle, Ability, FailureReason);
-}
-
-void UActAbilitySystemComponent::NotifyAbilityChainActivationFailed(UGameplayAbility* Ability)
-{
-	if (!AbilityChainRuntime.IsValid())
-	{
-		return;
-	}
-
-	const UActGameplayAbility* ActAbility = Cast<UActGameplayAbility>(Ability);
-	if (!ActAbility)
-	{
-		return;
-	}
-
-	AbilityChainRuntime->NotifyAbilityActivationFailed(ActAbility->GetAbilityId());
 }
 
 

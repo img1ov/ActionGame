@@ -7,7 +7,6 @@
 #include "GameplayTagAssetInterface.h"
 #include "Teams/ActTeamAgentInterface.h"
 #include "BulletSystemInterface.h"
-#include "Character/ActCharacterMovementTypes.h"
 
 #include "ActCharacter.generated.h"
 
@@ -17,6 +16,7 @@ class UActCharacterMovementComponent;
 class UActCameraComponent;
 class UActSpringArmComponent;
 class UActBattleComponent;
+class UActComboGraphComponent;
 class AActPlayerState;
 class AActPlayerController;
 class UActPawnData;
@@ -27,59 +27,6 @@ class UBulletSystemComponent;
 struct FFrame;
 struct FGameplayTag;
 struct FGameplayTagContainer;
-
-USTRUCT()
-struct FActReplicatedAcceleration
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	uint8 AccelXYRadians = 0;	// Direction of XY accel component, quantized to represent [0, 2*pi]
-
-	UPROPERTY()
-	uint8 AccelXYMagnitude = 0;	//Accel rate of XY component, quantized to represent [0, MaxAcceleration]
-
-	UPROPERTY()
-	int8 AccelZ = 0;	// Raw Z accel rate component, quantized to represent [-MaxAcceleration, MaxAcceleration]
-};
-
-USTRUCT()
-struct FSharedRepMovement
-{
-	GENERATED_BODY()
-
-	FSharedRepMovement();
-
-	bool FillForCharacter(ACharacter* Character);
-	bool Equals(const FSharedRepMovement& Other, ACharacter* Character) const;
-
-	bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess);
-
-	UPROPERTY(Transient)
-	FRepMovement RepMovement;
-
-	UPROPERTY(Transient)
-	float RepTimeStamp = 0.0f;
-
-	UPROPERTY(Transient)
-	uint8 RepMovementMode = 0;
-
-	UPROPERTY(Transient)
-	bool bProxyIsJumpForceApplied = false;
-
-	UPROPERTY(Transient)
-	bool bIsCrouched = false;
-};
-
-template<>
-struct TStructOpsTypeTraits<FSharedRepMovement> : public TStructOpsTypeTraitsBase2<FSharedRepMovement>
-{
-	enum
-	{
-		WithNetSerializer = true,
-		WithNetSharedSerialization = true,
-	};
-};
 
 /**
  * AActCharacter
@@ -124,7 +71,6 @@ public:
 	UE_API virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	UE_API virtual void Reset() override;
 	UE_API virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	UE_API virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 	//~End of AActor interface
 
 	//~APawn interface
@@ -137,16 +83,6 @@ public:
 	UE_API virtual FOnActTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() override;
 	//~End of IActTeamAgentInterface interface
 	
-	/** RPCs that is called on frames when default property replication is skipped. This replicates a single movement update to everyone. */
-	UFUNCTION(NetMulticast, unreliable)
-	UE_API void FastSharedReplication(const FSharedRepMovement& SharedRepMovement);
-	
-	// Last FSharedRepMovement we sent, to avoid sending repeatedly.
-	FSharedRepMovement LastSharedReplication;
-	
-	virtual bool UpdateSharedReplication();
-	UE_API void RefreshReplicatedMotionStateFromMovement();
-
 protected:
 
 	UE_API virtual void OnAbilitySystemInitialized();
@@ -197,6 +133,9 @@ private:
 	TObjectPtr<UActBattleComponent> BattleComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UActComboGraphComponent> ComboGraphComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UBulletSystemComponent> BulletSystemComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
@@ -207,12 +146,6 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Act|Character", Meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UActCameraComponent> CameraComponent;
-	
-	UPROPERTY(Transient, ReplicatedUsing = OnRep_ReplicatedAcceleration)
-	FActReplicatedAcceleration ReplicatedAcceleration;
-
-	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedMotions)
-	TArray<FActReplicatedMotion> ReplicatedMotions;
 	
 	UPROPERTY(ReplicatedUsing = OnRep_MyTeamID)
 	FGenericTeamId MyTeamID;
@@ -233,13 +166,7 @@ private:
 	
 	UFUNCTION()
 	UE_API void OnControllerChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam);
-	
-	UFUNCTION()
-	UE_API void OnRep_ReplicatedAcceleration();
 
-	UFUNCTION()
-	UE_API void OnRep_ReplicatedMotions();
-	
 	UFUNCTION()
 	UE_API void OnRep_MyTeamID(FGenericTeamId OldTeamID);
 	

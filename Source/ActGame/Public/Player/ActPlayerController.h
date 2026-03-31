@@ -77,9 +77,6 @@ public:
 	/** Debug/inspection only: analyzer internals are not mutation API. */
 	UE_API const FActBattleInputAnalyzer* GetInputAnalyzer() const { return BattleInputAnalyzer.Get(); }
 	
-	/** Clears ASC-owned combo runtime state. The player controller itself does not own combo state. */
-	UE_API void ClearAbilityChainCache();
-	
 protected:
 	
 	//~AActor interface

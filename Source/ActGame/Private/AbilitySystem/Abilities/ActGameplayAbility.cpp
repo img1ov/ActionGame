@@ -73,6 +73,7 @@ void UActGameplayAbility::TryActivateAbilityOnSpawn(const FGameplayAbilityActorI
 
 bool UActGameplayAbility::CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayTagContainer* SourceTags, const FGameplayTagContainer* TargetTags, FGameplayTagContainer* OptionalRelevantTags) const
 {
+
 	if (!ActorInfo || !ActorInfo->AbilitySystemComponent.IsValid())
 	{
 		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityId=%s Owner=%s Reason=InvalidActorInfo Time=%.3f"),
@@ -107,16 +108,6 @@ bool UActGameplayAbility::CanActivateAbility(const FGameplayAbilitySpecHandle Ha
 			*AbilityId.ToString(),
 			*GetAbilityOwnerName(ActorInfo),
 			static_cast<int32>(ActivationGroup),
-			GetAbilityLogTimeSeconds(ActorInfo));
-		return false;
-	}
-
-	if (!ActASC->CanActivateAbilityForChain(*this, OptionalRelevantTags))
-	{
-		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleAbility] CanActivate rejected. Ability=%s AbilityId=%s Owner=%s Reason=AbilityChain Time=%.3f"),
-			*GetNameSafe(this),
-			*AbilityId.ToString(),
-			*GetAbilityOwnerName(ActorInfo),
 			GetAbilityLogTimeSeconds(ActorInfo));
 		return false;
 	}
@@ -246,11 +237,6 @@ void UActGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 		TriggerEventData ? *TriggerEventData->EventTag.ToString() : TEXT("None"));
 
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
-
-	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
-	{
-		ActASC->BeginAbilityChain(*this, Handle);
-	}
 }
 
 void UActGameplayAbility::CancelAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateCancelAbility)
@@ -280,12 +266,6 @@ void UActGameplayAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, co
 		bReplicateEndAbility,
 		bWasCancelled,
 		GetAbilityLogTimeSeconds(ActorInfo));
-
-	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
-	{
-		ActASC->EndAbilityChain(*this, Handle);
-	}
-
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 

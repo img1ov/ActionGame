@@ -9,6 +9,7 @@
 #include "Camera/ActCameraComponent.h"
 #include "Camera/ActSpringArmComponent.h"
 #include "Character/ActBattleComponent.h"
+#include "Character/ActComboGraphComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -28,10 +29,11 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = false;
 	PrimaryActorTick.bStartWithTickEnabled = false;
-	SetNetUpdateFrequency(120.0f);
-	SetMinNetUpdateFrequency(60.0f);
+	SetNetUpdateFrequency(150.0f);
+	SetMinNetUpdateFrequency(100.0f);
 
 	SetNetCullDistanceSquared(900000000.f);
+	GetReplicatedMovement_Mutable().RotationQuantizationLevel = ERotatorQuantization::ShortComponents;
 
 	UCapsuleComponent* CapsuleComp = GetCapsuleComponent();
 	check(CapsuleComp);
@@ -56,6 +58,7 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 	PawnExtComponent->OnAbilitySystemUninitialized_Register(FSimpleMulticastDelegate::FDelegate::CreateUObject(this, &ThisClass::OnAbilitySystemUninitialized));
 
 	BattleComponent = CreateDefaultSubobject<UActBattleComponent>(TEXT("BattleComponent"));
+	ComboGraphComponent = CreateDefaultSubobject<UActComboGraphComponent>(TEXT("ComboGraphComponent"));
 
 	HealthComponent = CreateDefaultSubobject<UActHealthComponent>(TEXT("HealthComponent"));
 	HealthComponent->OnDeathStarted.AddDynamic(this, &ThisClass::OnDeathStarted);
@@ -200,27 +203,7 @@ void AActCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME_CONDITION(ThisClass, ReplicatedAcceleration, COND_SimulatedOnly);
-	DOREPLIFETIME(ThisClass, ReplicatedMotions);
 	DOREPLIFETIME(ThisClass, MyTeamID);
-}
-
-void AActCharacter::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
-{
-	Super::PreReplication(ChangedPropertyTracker);
-
-	if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
-	{
-		// Compress Acceleration: XY components as direction + magnitude, Z component as direct value
-		const double MaxAccel = MovementComponent->MaxAcceleration;
-		const FVector CurrentAccel = MovementComponent->GetCurrentAcceleration();
-		double AccelXYRadians, AccelXYMagnitude;
-		FMath::CartesianToPolar(CurrentAccel.X, CurrentAccel.Y, AccelXYMagnitude, AccelXYRadians);
-
-		ReplicatedAcceleration.AccelXYRadians   = FMath::FloorToInt((AccelXYRadians / TWO_PI) * 255.0);     // [0, 2PI] -> [0, 255]
-		ReplicatedAcceleration.AccelXYMagnitude = FMath::FloorToInt((AccelXYMagnitude / MaxAccel) * 255.0);	// [0, MaxAccel] -> [0, 255]
-		ReplicatedAcceleration.AccelZ           = FMath::FloorToInt((CurrentAccel.Z / MaxAccel) * 127.0);   // [-MaxAccel, MaxAccel] -> [-127, 127]
-	}
 }
 
 void AActCharacter::NotifyControllerChanged()
@@ -271,100 +254,6 @@ FOnActTeamIndexChangedDelegate* AActCharacter::GetOnTeamIndexChangedDelegate()
 	return &OnTeamChangedDelegate;
 }
 
-void AActCharacter::FastSharedReplication_Implementation(const FSharedRepMovement& SharedRepMovement)
-{
-	if (GetWorld()->IsPlayingReplay())
-	{
-		return;
-	}
-
-	// Timestamp is checked to reject old moves.
-	if (GetLocalRole() == ROLE_SimulatedProxy)
-	{
-		// Timestamp
-		SetReplicatedServerLastTransformUpdateTimeStamp(SharedRepMovement.RepTimeStamp);
-
-		// Movement mode
-		if (GetReplicatedMovementMode() != SharedRepMovement.RepMovementMode)
-		{
-			SetReplicatedMovementMode(SharedRepMovement.RepMovementMode);
-			GetCharacterMovement()->bNetworkMovementModeChanged = true;
-			GetCharacterMovement()->bNetworkUpdateReceived = true;
-		}
-
-		const FVector ServerLocation = FRepMovement::RebaseOntoLocalOrigin(SharedRepMovement.RepMovement.Location, this);
-		UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent();
-		const bool bSuppressSharedReplication = ActMovementComponent && ActMovementComponent->ShouldSuppressSharedReplication(ServerLocation);
-
-		if (!bSuppressSharedReplication)
-		{
-			// Location, Rotation, Velocity, etc.
-			FRepMovement& MutableRepMovement = GetReplicatedMovement_Mutable();
-			MutableRepMovement = SharedRepMovement.RepMovement;
-
-			// This also sets LastRepMovement
-			OnRep_ReplicatedMovement();
-		}
-		else if (ActMovementComponent)
-		{
-			ActMovementComponent->ApplySuppressedSharedReplication(ServerLocation, SharedRepMovement.RepMovement.LinearVelocity);
-		}
-
-		// Jump force
-		SetProxyIsJumpForceApplied(SharedRepMovement.bProxyIsJumpForceApplied);
-
-		// Crouch
-		if (IsCrouched() != SharedRepMovement.bIsCrouched)
-		{
-			SetIsCrouched(SharedRepMovement.bIsCrouched);
-			OnRep_IsCrouched();
-		}
-	}
-}
-
-void AActCharacter::RefreshReplicatedMotionStateFromMovement()
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	if (UActCharacterMovementComponent* ActMovementComponent = GetActMovementComponent())
-	{
-		ActMovementComponent->BuildReplicatedMotionEntries(ReplicatedMotions);
-	}
-	else
-	{
-		ReplicatedMotions.Reset();
-	}
-}
-
-bool AActCharacter::UpdateSharedReplication()
-{
-	if (GetLocalRole() == ROLE_Authority)
-	{
-		FSharedRepMovement SharedMovement;
-		if (SharedMovement.FillForCharacter(this))
-		{
-			// Only call FastSharedReplication if data has changed since the last frame.
-			// Skipping this call will cause replication to reuse the same bunch that we previously
-			// produced, but not send it to clients that already received. (But a new client who has not received
-			// it, will get it this frame)
-			if (!SharedMovement.Equals(LastSharedReplication, this))
-			{
-				LastSharedReplication = SharedMovement;
-				SetReplicatedMovementMode(SharedMovement.RepMovementMode);
-
-				FastSharedReplication(SharedMovement);
-			}
-			return true;
-		}
-	}
-
-	// We cannot fastrep right now. Don't send anything.
-	return false;
-}
-
 void AActCharacter::OnControllerChangedTeam(UObject* TeamAgent, int32 OldTeam, int32 NewTeam)
 {
 	const FGenericTeamId MyOldTeamID = MyTeamID;
@@ -375,31 +264,6 @@ void AActCharacter::OnControllerChangedTeam(UObject* TeamAgent, int32 OldTeam, i
 void AActCharacter::OnRep_MyTeamID(FGenericTeamId OldTeamID)
 {
 	ConditionalBroadcastTeamChanged(this, OldTeamID, MyTeamID);
-}
-
-void AActCharacter::OnRep_ReplicatedAcceleration()
-{
-	if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(GetCharacterMovement()))
-	{
-		// Decompress Acceleration
-		const double MaxAccel         = ActMovementComponent->MaxAcceleration;
-		const double AccelXYMagnitude = double(ReplicatedAcceleration.AccelXYMagnitude) * MaxAccel / 255.0; // [0, 255] -> [0, MaxAccel]
-		const double AccelXYRadians   = double(ReplicatedAcceleration.AccelXYRadians) * TWO_PI / 255.0;     // [0, 255] -> [0, 2PI]
-
-		FVector UnpackedAcceleration(FVector::ZeroVector);
-		FMath::PolarToCartesian(AccelXYMagnitude, AccelXYRadians, UnpackedAcceleration.X, UnpackedAcceleration.Y);
-		UnpackedAcceleration.Z = double(ReplicatedAcceleration.AccelZ) * MaxAccel / 127.0; // [-127, 127] -> [-MaxAccel, MaxAccel]
-
-		ActMovementComponent->SetReplicatedAcceleration(UnpackedAcceleration);
-	}
-}
-
-void AActCharacter::OnRep_ReplicatedMotions()
-{
-	if (UActCharacterMovementComponent* ActMovementComponent = Cast<UActCharacterMovementComponent>(GetCharacterMovement()))
-	{
-		ActMovementComponent->SyncReplicatedMotions(ReplicatedMotions);
-	}
 }
 
 void AActCharacter::OnAbilitySystemInitialized()
@@ -616,97 +480,4 @@ bool AActCharacter::CanJumpInternal_Implementation() const
 {
 	// same as ACharacter's implementation but without the crouch check
 	return JumpIsAllowedInternal();
-}
-
-FSharedRepMovement::FSharedRepMovement()
-{
-	RepMovement.LocationQuantizationLevel = EVectorQuantization::RoundTwoDecimals;
-	RepMovement.VelocityQuantizationLevel = EVectorQuantization::RoundTwoDecimals;
-	RepMovement.RotationQuantizationLevel = ERotatorQuantization::ShortComponents;
-}
-
-bool FSharedRepMovement::FillForCharacter(ACharacter* Character)
-{
-	if (USceneComponent* PawnRootComponent = Character->GetRootComponent())
-	{
-		UCharacterMovementComponent* CharacterMovement = Character->GetCharacterMovement();
-
-		RepMovement.Location = FRepMovement::RebaseOntoZeroOrigin(PawnRootComponent->GetComponentLocation(), Character);
-		RepMovement.Rotation = PawnRootComponent->GetComponentRotation();
-		RepMovement.LinearVelocity = CharacterMovement->Velocity;
-		RepMovementMode = CharacterMovement->PackNetworkMovementMode();
-		bProxyIsJumpForceApplied = Character->GetProxyIsJumpForceApplied() || (Character->JumpForceTimeRemaining > 0.0f);
-		bIsCrouched = Character->IsCrouched();
-
-		// Timestamp is sent as zero if unused
-		if ((CharacterMovement->NetworkSmoothingMode == ENetworkSmoothingMode::Linear) || CharacterMovement->bNetworkAlwaysReplicateTransformUpdateTimestamp)
-		{
-			RepTimeStamp = CharacterMovement->GetServerLastTransformUpdateTimeStamp();
-		}
-		else
-		{
-			RepTimeStamp = 0.f;
-		}
-
-		return true;
-	}
-	return false;
-}
-
-bool FSharedRepMovement::Equals(const FSharedRepMovement& Other, ACharacter* Character) const
-{
-	if (RepMovement.Location != Other.RepMovement.Location)
-	{
-		return false;
-	}
-
-	if (RepMovement.Rotation != Other.RepMovement.Rotation)
-	{
-		return false;
-	}
-
-	if (RepMovement.LinearVelocity != Other.RepMovement.LinearVelocity)
-	{
-		return false;
-	}
-
-	if (RepMovementMode != Other.RepMovementMode)
-	{
-		return false;
-	}
-
-	if (bProxyIsJumpForceApplied != Other.bProxyIsJumpForceApplied)
-	{
-		return false;
-	}
-
-	if (bIsCrouched != Other.bIsCrouched)
-	{
-		return false;
-	}
-
-	return true;
-}
-
-bool FSharedRepMovement::NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess)
-{
-	bOutSuccess = true;
-	RepMovement.NetSerialize(Ar, Map, bOutSuccess);
-	Ar << RepMovementMode;
-	Ar << bProxyIsJumpForceApplied;
-	Ar << bIsCrouched;
-
-	// Timestamp, if non-zero.
-	uint8 bHasTimeStamp = (RepTimeStamp != 0.f);
-	Ar.SerializeBits(&bHasTimeStamp, 1);
-	if (bHasTimeStamp)
-	{
-		Ar << RepTimeStamp;
-	}
-	else
-	{
-		RepTimeStamp = 0.f;
-	}
-
-	return true;
 }

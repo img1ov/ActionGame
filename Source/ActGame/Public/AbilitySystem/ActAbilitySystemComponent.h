@@ -4,7 +4,6 @@
 
 #include "AbilitySystemComponent.h"
 #include "Abilities/ActGameplayAbility.h"
-#include "AbilitySystem/AbilityChain/ActAbilityChainRuntime.h"
 #include "NativeGameplayTags.h"
 
 #include "ActAbilitySystemComponent.generated.h"
@@ -12,7 +11,6 @@
 #define UE_API ACTGAME_API
 
 class AActor;
-class FActAbilityChainRuntime;
 class UGameplayAbility;
 class UActAbilityTagRelationshipMapping;
 class UActGameplayAbility;
@@ -97,33 +95,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Act|Ability", DisplayName="AbilityInputTagReleased")
 	UE_API void K2_AbilityInputTagReleased(const FGameplayTag InputTag);
 
-	/** Clears the entire combo runtime state. */
-	UE_API void ResetAbilityChainRuntime();
-
-	/** True if one active ability currently owns a valid combo runtime context. */
-	UE_API bool HasActiveAbilityChain() const;
-
-	/** Combo-specific activation gate consulted from UActGameplayAbility::CanActivateAbility. */
-	UE_API bool CanActivateAbilityForChain(const UActGameplayAbility& Ability, FGameplayTagContainer* OptionalRelevantTags) const;
-
-	/** Registers a newly activated combo source ability. */
-	UE_API void BeginAbilityChain(UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
-
-	/** Unregisters the combo source ability when it ends. */
-	UE_API void EndAbilityChain(const UActGameplayAbility& Ability, FGameplayAbilitySpecHandle SpecHandle);
-
-	/** Opens one authored combo window from an AnimNotifyState. */
-	UE_API void OpenAbilityChainWindow(const FActAbilityChainWindowDefinition& WindowDefinition);
-
-	/** Closes one authored combo window by its runtime window Id. */
-	UE_API void CloseAbilityChainWindow(FName WindowId);
-
-	/** Resolves one command against the currently active combo windows. */
-	UE_API FActAbilityChainCommandResolveResult ResolveAbilityChainCommand(const FGameplayTag& CommandTag);
-
-	/** Validates and authorizes one predicted combo follow-up activation. */
-	UE_API bool AuthorizePredictedAbilityChainActivation(const FActAbilityChainActivationRequest& Request);
-	
 	UE_API void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
 	UE_API void ClearAbilityInput();
 	
@@ -149,8 +120,6 @@ protected:
 
 	UE_API virtual void ClientTryActivateAbility_Implementation(FGameplayAbilitySpecHandle AbilityToActivate) override;
 	UE_API virtual void ClientActivateAbilityFailed_Implementation(FGameplayAbilitySpecHandle AbilityToActivate, int16 PredictionKey) override;
-	UFUNCTION(Server, Reliable)
-	void ServerAuthorizeAbilityChainActivation(const FActAbilityChainActivationRequest& Request);
 	UE_API virtual void OnGiveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRemoveAbility(FGameplayAbilitySpec& AbilitySpec) override;
 	UE_API virtual void OnRep_ActivateAbilities() override;
@@ -162,12 +131,6 @@ protected:
 	UE_API virtual void AbilitySpecInputReleased(FGameplayAbilitySpec& Spec) override;
 
 	UE_API virtual void ApplyAbilityBlockAndCancelTags(const FGameplayTagContainer& AbilityTags, UGameplayAbility* RequestingAbility, bool bEnableBlockTags, const FGameplayTagContainer& BlockTags, bool bExecuteCancelTags, const FGameplayTagContainer& CancelTags) override;
-
-	/** True when local prediction should forward combo authorization to the authority ASC. */
-	bool ShouldForwardAbilityChainAuthorizationToServer() const;
-
-	/** Forwards GAS activation failure back into the combo runtime when the failed ability is part of the chain system. */
-	void NotifyAbilityChainActivationFailed(UGameplayAbility* Ability);
 
 	/** True when a rejected predicted activation should keep its local presentation alive. */
 	bool ShouldPreserveClientAbilityPresentationOnActivationFailure(const FGameplayAbilitySpec* AbilitySpec) const;
@@ -195,9 +158,6 @@ protected:
 
 	// Number of abilities running in each activation group.
 	int32 ActivationGroupCounts[(uint8)EActAbilityActivationGroup::MAX];
-
-	/** Authoritative combo runtime owned by the ASC. */
-	TUniquePtr<FActAbilityChainRuntime> AbilityChainRuntime;
 };
 
 #undef UE_API

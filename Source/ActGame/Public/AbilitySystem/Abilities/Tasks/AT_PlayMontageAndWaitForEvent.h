@@ -1,21 +1,21 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
 #include "Abilities/Tasks/AbilityTask.h"
-
+#include "AbilitySystem/ActAbilitySystemComponent.h"
 #include "AT_PlayMontageAndWaitForEvent.generated.h"
 
-class UActAbilitySystemComponent;
+class URPGAbilitySystemComponent;
+
 /** Delegate type used, EventTag and Payload may be empty if it came from the montage callbacks */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPlayMontageAndWaitForEventDelegate, FGameplayTag, EventTag, FGameplayEventData, EventData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FRPGPlayMontageAndWaitForEventDelegate, FGameplayTag, EventTag, FGameplayEventData, EventData);
 
 /**
- * Default montage + gameplay-event task.
- *
- * Primary use:
- * - montage is only presentation / notify container
- * - gameplay displacement is handled elsewhere through ApplyAddMove or other movement code
+ * This task combines PlayMontageAndWait and WaitForEvent into one task, so you can wait for multiple types of activations such as from a melee combo
+ * Much of this code is copied from one of those two ability tasks
+ * This is a good task to look at as an example when creating game-specific tasks
+ * It is expected that each game will have a set of game-specific tasks to do what they want
  */
 UCLASS()
 class ACTGAME_API UAT_PlayMontageAndWaitForEvent : public UAbilityTask
@@ -23,8 +23,32 @@ class ACTGAME_API UAT_PlayMontageAndWaitForEvent : public UAbilityTask
 	GENERATED_BODY()
 
 public:
-
+	// Constructor and overrides
 	UAT_PlayMontageAndWaitForEvent(const FObjectInitializer& ObjectInitializer);
+	virtual void Activate() override;
+	virtual void ExternalCancel() override;
+	virtual FString GetDebugString() const override;
+	virtual void OnDestroy(bool AbilityEnded) override;
+
+	/** The montage completely finished playing */
+	UPROPERTY(BlueprintAssignable)
+	FRPGPlayMontageAndWaitForEventDelegate OnCompleted;
+
+	/** The montage started blending out */
+	UPROPERTY(BlueprintAssignable)
+	FRPGPlayMontageAndWaitForEventDelegate OnBlendOut;
+
+	/** The montage was interrupted */
+	UPROPERTY(BlueprintAssignable)
+	FRPGPlayMontageAndWaitForEventDelegate OnInterrupted;
+
+	/** The ability task was explicitly cancelled by another ability */
+	UPROPERTY(BlueprintAssignable)
+	FRPGPlayMontageAndWaitForEventDelegate OnCancelled;
+
+	/** One of the triggering gameplay events happened */
+	UPROPERTY(BlueprintAssignable)
+	FRPGPlayMontageAndWaitForEventDelegate EventReceived;
 
 	/**
 	 * Play a montage and wait for it end. If a gameplay event happens that matches EventTags (or EventTags is empty), the EventReceived delegate will fire with a tag and event data.
@@ -37,10 +61,10 @@ public:
 	 * @param EventTags Any gameplay events matching this tag will activate the EventReceived callback. If empty, all events will trigger callback
 	 * @param Rate Change to play the montage faster or slower
 	 * @param bStopWhenAbilityEnds If true, this montage will be aborted if the ability ends normally. It is always stopped when the ability is explicitly cancelled
-	 * @param AnimRootMotionTranslationScale Pure playback defaults to 0 so authored AnimRootMotion does not leak into procedural motion flows
+	 * @param AnimRootMotionTranslationScale Change to modify size of root motion or set to 0 to block it entirely
 	 */
-	UFUNCTION(BlueprintCallable, Category="Ability|Tasks", meta = (DisplayName = "PlayMontageAndWaitForEvent", HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
-	static UAT_PlayMontageAndWaitForEvent* CreatePlayMontageAndWaitForEvent(
+	UFUNCTION(BlueprintCallable, Category="Ability|Tasks", meta = (HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
+	static UAT_PlayMontageAndWaitForEvent* PlayMontageAndWaitForEvent(
 		UGameplayAbility* OwningAbility,
 		FName TaskInstanceName,
 		UAnimMontage* MontageToPlay,
@@ -48,58 +72,9 @@ public:
 		float Rate = 1.f,
 		FName StartSection = NAME_None,
 		bool bStopWhenAbilityEnds = true,
-		float AnimRootMotionTranslationScale = 0.f
-	);
-	
-	virtual void Activate() override;
-	virtual void ExternalCancel() override;
-	virtual FString GetDebugString() const override;
-	virtual void OnDestroy(bool bInOwnerFinished) override;
+		float AnimRootMotionTranslationScale = 1.f);
 
 private:
-
-	/** Checks if the ability is playing a montage and stops that montage, returns true if a montage was stopped, false if not. */
-	bool StopPlayingMontage();
-
-	/** Returns our ability system component */
-	UActAbilitySystemComponent* GetActAbilitySystemComponent();
-
-	void OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
-	void OnAbilityCancelled();
-	void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
-	void OnGameplayEvent(FGameplayTag EventTag, const FGameplayEventData* Payload);
-
-	/** Bound to AnimInstance so task delegates mirror montage lifecycle. */
-	FOnMontageBlendingOutStarted BlendingOutDelegate;
-	FOnMontageEnded MontageEndedDelegate;
-	/** Handles removal of ability-cancel and gameplay-event callbacks on task destroy. */
-	FDelegateHandle CancelledHandle;
-	FDelegateHandle EventHandle;
-
-public:
-
-	/** The montage completely finished playing */
-	UPROPERTY(BlueprintAssignable)
-	FPlayMontageAndWaitForEventDelegate OnCompleted;
-
-	/** The montage started blending out */
-	UPROPERTY(BlueprintAssignable)
-	FPlayMontageAndWaitForEventDelegate OnBlendOut;
-
-	/** The montage was interrupted */
-	UPROPERTY(BlueprintAssignable)
-	FPlayMontageAndWaitForEventDelegate OnInterrupted;
-
-	/** The ability task was explicitly cancelled by another ability */
-	UPROPERTY(BlueprintAssignable)
-	FPlayMontageAndWaitForEventDelegate OnCancelled;
-
-	/** One of the triggering gameplay events happened */
-	UPROPERTY(BlueprintAssignable)
-	FPlayMontageAndWaitForEventDelegate EventReceived;
-
-private:
-
 	/** Montage that is playing */
 	UPROPERTY()
 	UAnimMontage* MontageToPlay;
@@ -116,7 +91,7 @@ private:
 	UPROPERTY()
 	FName StartSection;
 
-	/** Scales native animation root motion when montage motion extraction is disabled. */
+	/** Modifies how root motion movement to apply */
 	UPROPERTY()
 	float AnimRootMotionTranslationScale;
 
@@ -124,4 +99,19 @@ private:
 	UPROPERTY()
 	bool bStopWhenAbilityEnds;
 
+	/** Checks if the ability is playing a montage and stops that montage, returns true if a montage was stopped, false if not. */
+	bool StopPlayingMontage();
+
+	/** Returns our ability system component */
+	UActAbilitySystemComponent* GetTargetASC();
+
+	void OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
+	void OnAbilityCancelled();
+	void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void OnGameplayEvent(FGameplayTag EventTag, const FGameplayEventData* Payload);
+
+	FOnMontageBlendingOutStarted BlendingOutDelegate;
+	FOnMontageEnded MontageEndedDelegate;
+	FDelegateHandle CancelledHandle;
+	FDelegateHandle EventHandle;
 };

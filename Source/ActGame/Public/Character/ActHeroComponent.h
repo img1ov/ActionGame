@@ -65,6 +65,7 @@ protected:
 	UE_API void Input_Move(const FInputActionValue& InputActionValue);
 	UE_API void Input_LookMouse(const FInputActionValue& InputActionValue);
 
+
 public:
 
 	/**
@@ -83,6 +84,10 @@ public:
 	/** Clears all movement-input block sources. */
 	UFUNCTION(BlueprintCallable, Category = "Act|Input")
 	UE_API void ClearMovementInputBlocks();
+
+	/** Clears the current authored locomotion input and optionally suppresses the next input sample. */
+	UFUNCTION(BlueprintCallable, Category = "Act|Input")
+	UE_API void FlushMovementInput(bool bSuppressNextSample = true);
 
 	/** True if any valid movement-input block source is active. */
 	UFUNCTION(BlueprintPure, Category = "Act|Input")

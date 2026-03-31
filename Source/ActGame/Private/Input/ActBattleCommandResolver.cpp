@@ -4,7 +4,7 @@
 
 #include "ActLogChannels.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
-#include "AbilitySystem/AbilityChain/ActAbilityChainRuntime.h"
+#include "Character/ActComboGraphComponent.h"
 
 namespace
 {
@@ -30,26 +30,22 @@ EActBattleCommandResolveResult FActBattleCommandResolver::ResolveCommand(
 		return EActBattleCommandResolveResult::NotHandled;
 	}
 
-	const FActAbilityChainCommandResolveResult ChainResult = ActASC.ResolveAbilityChainCommand(CommandTag);
-	if (ChainResult.WasHandled())
+	if (UActComboGraphComponent* ComboGraphComp = UActComboGraphComponent::FindComboGraphComponent(ActASC.GetAvatarActor()))
 	{
-		// All combo authority lives in ASC; the input layer only consumes the resolved command.
-		bOutShouldConsumeCommand = ChainResult.bConsumeInput;
-		UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleCommand] Chain resolved. Owner=%s Command=%s Mode=%d SourceAbilityId=%s TargetAbilityId=%s Time=%.3f"),
-			*GetNameSafe(ActASC.GetAvatarActor()),
-			*CommandTag.ToString(),
-			static_cast<int32>(ChainResult.Resolution),
-			*ChainResult.SourceAbilityId.ToString(),
-			*ChainResult.TargetAbilityId.ToString(),
-			GetResolverTimeSeconds(ActASC));
-		return EActBattleCommandResolveResult::Activated;
-	}
+		if (ComboGraphComp->TryHandleCommand(CommandTag))
+		{
+			UE_LOG(LogActAbilitySystem, Verbose, TEXT("[BattleCommand] ComboGraph handled. Owner=%s Command=%s Active=%d Time=%.3f"),
+				*GetNameSafe(ActASC.GetAvatarActor()),
+				*CommandTag.ToString(),
+				ComboGraphComp->IsComboGraphActive(),
+				GetResolverTimeSeconds(ActASC));
+			return EActBattleCommandResolveResult::Activated;
+		}
 
-	if (ActASC.HasActiveAbilityChain() || ActASC.GetAnimatingAbility() != nullptr)
-	{
-		// If something combat-related is active, we do not attempt "starter fallback" here.
-		// The chain runtime is the only place that can decide whether a transition is allowed.
-		return EActBattleCommandResolveResult::NotHandled;
+		if (ComboGraphComp->IsComboGraphActive())
+		{
+			return EActBattleCommandResolveResult::NotHandled;
+		}
 	}
 
 	const bool bActivated = ActASC.TryActivateGrantedAbilityByInputTag(

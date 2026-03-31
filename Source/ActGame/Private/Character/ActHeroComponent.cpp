@@ -8,7 +8,7 @@
 #include "EnhancedInputSubsystemInterface.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
-#include "Character/ActBattleComponent.h"
+#include "Character/ActComboGraphComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -25,8 +25,6 @@
 
 namespace
 {
-const FGameplayTag InputTag_StrafeMove = ActGameplayTags::FindTagByString(TEXT("InputTag.StrafeMove"), false);
-
 EInputDirection QuantizeLocalDirection(const FVector2D& LocalDirection)
 {
 	// Quantize analog stick / WASD input into 8 directions plus Neutral for command matching.
@@ -178,6 +176,11 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 			{
 				BulletComp->SetBulletConfig(PawnData->BulletConfig);
 			}
+		}
+
+		if (UActComboGraphComponent* ComboGraphComp = Pawn->FindComponentByClass<UActComboGraphComponent>())
+		{
+			ComboGraphComp->SetComboGraphConfig(PawnData ? PawnData->ComboGraphConfig : nullptr);
 		}
 
 		if (AActPlayerController* ActPC = GetController<AActPlayerController>())
@@ -365,15 +368,14 @@ void UActHeroComponent::PushMovementInputBlock(UObject* Source)
 		return;
 	}
 
-	const bool bWasBlocked = IsMovementInputBlocked();
 	TWeakObjectPtr<UObject> SourceKey(Source);
 	int32& RefCount = MovementInputBlockSources.FindOrAdd(SourceKey);
 	RefCount = FMath::Max(0, RefCount) + 1;
 
-	if (!bWasBlocked)
-	{
-		FlushPendingMovementInput(false);
-	}
+	// Always clear any pending locomotion intent when a lock window begins, even if a previous
+	// lock source is already active. Montage section jumps / overlapping notify windows can re-enter
+	// the same lock multiple times and should not carry stale movement input across boundaries.
+	FlushPendingMovementInput(false);
 }
 
 void UActHeroComponent::PopMovementInputBlock(UObject* Source)
@@ -383,7 +385,6 @@ void UActHeroComponent::PopMovementInputBlock(UObject* Source)
 		return;
 	}
 
-	const bool bWasBlocked = IsMovementInputBlocked();
 	const TWeakObjectPtr<UObject> SourceKey(Source);
 	if (int32* RefCount = MovementInputBlockSources.Find(SourceKey))
 	{
@@ -396,16 +397,21 @@ void UActHeroComponent::PopMovementInputBlock(UObject* Source)
 
 	PruneMovementInputBlockSources();
 
-	if (bWasBlocked && !IsMovementInputBlocked())
-	{
-		FlushPendingMovementInput(true);
-	}
+	// Clear accumulated locomotion again whenever a lock window ends. This prevents leftover input
+	// sampled during the transition frame from being applied immediately after unlock or between
+	// nested lock scopes.
+	FlushPendingMovementInput(true);
 }
 
 void UActHeroComponent::ClearMovementInputBlocks()
 {
 	MovementInputBlockSources.Reset();
 	FlushPendingMovementInput(true);
+}
+
+void UActHeroComponent::FlushMovementInput(const bool bSuppressNextSample)
+{
+	FlushPendingMovementInput(bSuppressNextSample);
 }
 
 bool UActHeroComponent::IsMovementInputBlocked() const
@@ -440,16 +446,6 @@ void UActHeroComponent::Input_AbilityInputTagPressed(const FGameplayTag InputTag
 {
 	if (const APawn* Pawn = GetPawn<APawn>())
 	{
-		if (InputTag.IsValid() && InputTag == InputTag_StrafeMove)
-		{
-			if (UActBattleComponent* BattleComp = Pawn->FindComponentByClass<UActBattleComponent>())
-			{
-				// Lock-on acquisition should react on the Shift press itself rather than waiting for the
-				// locomotion GA to finish activation, otherwise mid-combo lock attempts feel delayed or lost.
-				BattleComp->StartLockOnTarget();
-			}
-		}
-
 		if (const UActPawnExtensionComponent* PawnExtComp = UActPawnExtensionComponent::FindPawnExtensionComponent(Pawn))
 		{
 			if (UActAbilitySystemComponent* ActASC = PawnExtComp->GetActAbilitySystemComponent())
@@ -473,14 +469,6 @@ void UActHeroComponent::Input_AbilityInputTagReleased(const FGameplayTag InputTa
 {
 	if (const APawn* Pawn = GetPawn<APawn>())
 	{
-		if (InputTag.IsValid() && InputTag == InputTag_StrafeMove)
-		{
-			if (UActBattleComponent* BattleComp = Pawn->FindComponentByClass<UActBattleComponent>())
-			{
-				BattleComp->StopLockOnTarget();
-			}
-		}
-
 		if (const UActPawnExtensionComponent* PawnExtComp = UActPawnExtensionComponent::FindPawnExtensionComponent(Pawn))
 		{
 			if (UActAbilitySystemComponent* ActASC = PawnExtComp->GetActAbilitySystemComponent())
@@ -545,6 +533,7 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 		ActPC->PushDirectionToAnalyzer(QuantizeLocalDirection(LocalDirection));
 	}
 }
+
 
 FVector UActHeroComponent::GetMoveInputDirectionFromActor() const
 {
