@@ -15,49 +15,6 @@
 
 class UAbilitySystemComponent;
 
-namespace
-{
-    FVector BuildHitReactStrengthScaleFromAttackerSpace(
-        const FVector& LocalStrengthScale,
-        const AActor* SourceActor,
-        const AActor* TargetActor,
-        const FHitResult& TargetHit)
-    {
-        if (LocalStrengthScale.IsNearlyZero() || !SourceActor || !TargetActor)
-        {
-            return LocalStrengthScale;
-        }
-
-        FVector TargetPosition = TargetHit.ImpactPoint;
-        if (!TargetHit.bBlockingHit || TargetPosition.IsNearlyZero())
-        {
-            TargetPosition = TargetActor->GetActorLocation();
-        }
-
-        FVector AwayFromAttacker = TargetPosition - SourceActor->GetActorLocation();
-        AwayFromAttacker.Z = 0.0f;
-        if (AwayFromAttacker.IsNearlyZero())
-        {
-            AwayFromAttacker = SourceActor->GetActorForwardVector();
-            AwayFromAttacker.Z = 0.0f;
-        }
-
-        if (AwayFromAttacker.IsNearlyZero())
-        {
-            return LocalStrengthScale;
-        }
-
-        AwayFromAttacker.Normalize();
-        FVector Right = FVector::CrossProduct(FVector::UpVector, AwayFromAttacker).GetSafeNormal();
-        if (Right.IsNearlyZero())
-        {
-            Right = SourceActor->GetActorRightVector();
-        }
-
-        return Right * LocalStrengthScale.X + AwayFromAttacker * LocalStrengthScale.Y + FVector::UpVector * LocalStrengthScale.Z;
-    }
-}
-
 void UBulletLogicCreateBulletController::OnBegin(FBulletInfo& BulletInfo)
 {
     OnHit(BulletInfo, FHitResult());
@@ -304,12 +261,6 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 				FHitReactImpulse HitReactImpulse = BulletInfo.InitParams.Payload.HitReactImpulse;
 				if (HitReactImpulse.Tag.IsValid())
 				{
-					HitReactImpulse.Direction = BuildHitReactStrengthScaleFromAttackerSpace(
-						HitReactImpulse.Direction,
-						SourceActor,
-						TargetActor,
-						TargetHit);
-
 					FGameplayAbilityTargetDataHandle TargetData;
 					FHitReactImpulseTargetData* HitReactTargetData = new FHitReactImpulseTargetData();
 					HitReactTargetData->HitReactImpulse = HitReactImpulse;
@@ -321,7 +272,7 @@ bool UBulletLogicController_ApplyGameplayEffect::ApplyEffectToTarget(
 					EventData.Target = TargetActor;
 					EventData.TargetData = TargetData;
 					EventData.ContextHandle = SpecHandle.Data->GetContext();
-					EventData.EventMagnitude = HitReactImpulse.Strength;
+					EventData.EventMagnitude = HitReactImpulse.ImpulseVelocity.Size();
 
 					if (TargetASC->HandleGameplayEvent(EventData.EventTag, &EventData))
 					{

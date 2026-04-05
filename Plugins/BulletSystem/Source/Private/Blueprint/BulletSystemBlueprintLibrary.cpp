@@ -383,8 +383,3 @@ bool UBulletSystemBlueprintLibrary::GetHitReactImpulseFromEventData(const FGamep
 
 	return false;
 }
-
-FVector UBulletSystemBlueprintLibrary::GetHitReactAddMoveWorldVelocity(const FHitReactImpulse& HitReactImpulse)
-{
-	return HitReactImpulse.Direction * HitReactImpulse.Strength;
-}

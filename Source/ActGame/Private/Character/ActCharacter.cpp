@@ -9,7 +9,6 @@
 #include "Camera/ActCameraComponent.h"
 #include "Camera/ActSpringArmComponent.h"
 #include "Character/ActBattleComponent.h"
-#include "Character/ActComboGraphComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActHealthComponent.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -58,7 +57,6 @@ AActCharacter::AActCharacter(const FObjectInitializer& ObjectInitializer)
 	PawnExtComponent->OnAbilitySystemUninitialized_Register(FSimpleMulticastDelegate::FDelegate::CreateUObject(this, &ThisClass::OnAbilitySystemUninitialized));
 
 	BattleComponent = CreateDefaultSubobject<UActBattleComponent>(TEXT("BattleComponent"));
-	ComboGraphComponent = CreateDefaultSubobject<UActComboGraphComponent>(TEXT("ComboGraphComponent"));
 
 	HealthComponent = CreateDefaultSubobject<UActHealthComponent>(TEXT("HealthComponent"));
 	HealthComponent->OnDeathStarted.AddDynamic(this, &ThisClass::OnDeathStarted);
@@ -272,6 +270,7 @@ void AActCharacter::OnAbilitySystemInitialized()
 	check(ActASC);
 
 	HealthComponent->InitializeWithAbilitySystem(ActASC);
+	BattleComponent->InitializeWithAbilitySystem(ActASC);
 
 	InitializeGameplayTags();
 }
@@ -279,6 +278,7 @@ void AActCharacter::OnAbilitySystemInitialized()
 void AActCharacter::OnAbilitySystemUninitialized()
 {
 	HealthComponent->UninitializeFromAbilitySystem();
+	BattleComponent->UninitializeFromAbilitySystem();
 }
 
 void AActCharacter::PossessedBy(AController* NewController)

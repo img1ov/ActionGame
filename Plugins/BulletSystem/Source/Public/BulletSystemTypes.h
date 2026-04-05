@@ -119,7 +119,7 @@ USTRUCT(BlueprintType)
 struct FHitReactImpulse
 {
     GENERATED_BODY()
-
+    
     // GameplayEvent tag that drives GA_HitReact (ability should be triggered by this event tag).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     FGameplayTag Tag;
@@ -127,26 +127,12 @@ struct FHitReactImpulse
     // Direction for hit reaction visuals
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     EImpactDirection VisualDirection;
-
-    // Axis strength scale in attacker-relative space:
-    // +Y = away from attacker, +X = attacker-right, +Z = world up.
-    // This is not normalized. Final procedural AddMove world velocity should be:
-    //   StrengthScaleInWorld * Strength
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact", meta = (DisplayName = "StrengthScale"))
-    FVector Direction = FVector::ZeroVector;
-
-    // Primary strength used for scaling / montage selection / convenience (also mirrored into EventData.EventMagnitude).
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
-    float Strength = 0.0f;
+    FVector ImpulseVelocity = FVector::ZeroVector;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
     float Duration = 0.0f;
-
-    // Optional strength-over-time curve used by the target hit-react ability when converting this impulse
-    // into procedural movement. This scales Strength over normalized time.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReact")
-    TObjectPtr<UCurveFloat> StrengthCurve = nullptr;
-    
 };
 
 USTRUCT(BlueprintType)

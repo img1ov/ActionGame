@@ -8,7 +8,6 @@
 #include "EnhancedInputSubsystemInterface.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystem/ActAbilitySystemComponent.h"
-#include "Character/ActComboGraphComponent.h"
 #include "Character/ActCharacterMovementComponent.h"
 #include "Character/ActPawnData.h"
 #include "Character/ActPawnExtensionComponent.h"
@@ -178,11 +177,6 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 			}
 		}
 
-		if (UActComboGraphComponent* ComboGraphComp = Pawn->FindComponentByClass<UActComboGraphComponent>())
-		{
-			ComboGraphComp->SetComboGraphConfig(PawnData ? PawnData->ComboGraphConfig : nullptr);
-		}
-
 		if (AActPlayerController* ActPC = GetController<AActPlayerController>())
 		{
 			if (Pawn->InputComponent != nullptr)
@@ -190,8 +184,6 @@ void UActHeroComponent::HandleChangeInitState(UGameFrameworkComponentManager* Ma
 				InitializePlayerInput(Pawn->InputComponent);
 			}
 		}
-
-		OnDataAvailable.Broadcast();
 
 		//TODO: CameraMode
 		/*
@@ -269,7 +261,6 @@ void UActHeroComponent::BeginPlay()
 
 void UActHeroComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	ClearMovementInputBlocks();
 	UnregisterInitStateFeature();
 	
 	Super::EndPlay(EndPlayReason);
@@ -361,87 +352,6 @@ void UActHeroComponent::InitializePlayerInput(UInputComponent* PlayerInputCompon
 	UGameFrameworkComponentManager::SendGameFrameworkComponentExtensionEvent(const_cast<APawn*>(Pawn), NAME_BindInputsNow);
 }
 
-void UActHeroComponent::PushMovementInputBlock(UObject* Source)
-{
-	if (!Source)
-	{
-		return;
-	}
-
-	TWeakObjectPtr<UObject> SourceKey(Source);
-	int32& RefCount = MovementInputBlockSources.FindOrAdd(SourceKey);
-	RefCount = FMath::Max(0, RefCount) + 1;
-
-	// Always clear any pending locomotion intent when a lock window begins, even if a previous
-	// lock source is already active. Montage section jumps / overlapping notify windows can re-enter
-	// the same lock multiple times and should not carry stale movement input across boundaries.
-	FlushPendingMovementInput(false);
-}
-
-void UActHeroComponent::PopMovementInputBlock(UObject* Source)
-{
-	if (!Source)
-	{
-		return;
-	}
-
-	const TWeakObjectPtr<UObject> SourceKey(Source);
-	if (int32* RefCount = MovementInputBlockSources.Find(SourceKey))
-	{
-		--(*RefCount);
-		if (*RefCount <= 0)
-		{
-			MovementInputBlockSources.Remove(SourceKey);
-		}
-	}
-
-	PruneMovementInputBlockSources();
-
-	// Clear accumulated locomotion again whenever a lock window ends. This prevents leftover input
-	// sampled during the transition frame from being applied immediately after unlock or between
-	// nested lock scopes.
-	FlushPendingMovementInput(true);
-}
-
-void UActHeroComponent::ClearMovementInputBlocks()
-{
-	MovementInputBlockSources.Reset();
-	FlushPendingMovementInput(true);
-}
-
-void UActHeroComponent::FlushMovementInput(const bool bSuppressNextSample)
-{
-	FlushPendingMovementInput(bSuppressNextSample);
-}
-
-bool UActHeroComponent::IsMovementInputBlocked() const
-{
-	PruneMovementInputBlockSources();
-	return !MovementInputBlockSources.IsEmpty();
-}
-
-void UActHeroComponent::FlushPendingMovementInput(const bool bSuppressNextFrame)
-{
-	MoveInputVector = FVector2D::ZeroVector;
-	bSuppressMovementInputUntilNextSample = bSuppressNextFrame;
-
-	if (APawn* Pawn = GetPawn<APawn>())
-	{
-		Pawn->ConsumeMovementInputVector();
-	}
-}
-
-void UActHeroComponent::PruneMovementInputBlockSources() const
-{
-	for (auto It = MovementInputBlockSources.CreateIterator(); It; ++It)
-	{
-		if (!It.Key().IsValid() || It.Value() <= 0)
-		{
-			It.RemoveCurrent();
-		}
-	}
-}
-
 void UActHeroComponent::Input_AbilityInputTagPressed(const FGameplayTag InputTag)
 {
 	if (const APawn* Pawn = GetPawn<APawn>())
@@ -500,24 +410,16 @@ void UActHeroComponent::Input_Move(const FInputActionValue& InputActionValue)
 	}
 
 	const FVector2D Value = MoveInputVector;
-	const bool bSuppressMovementInputThisSample = bSuppressMovementInputUntilNextSample;
-	bSuppressMovementInputUntilNextSample = false;
-
 	const FRotator ControlRot(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FVector WorldMoveVector = ControlRot.RotateVector(FVector(Value.Y, Value.X, 0.f));
-	const bool bMovementInputBlocked = IsMovementInputBlocked();
-	const bool bHasMeaningfulMoveInput = !Value.IsNearlyZero();
-	const bool bShouldApplyMovementInput =
-		!bMovementInputBlocked &&
-		!bSuppressMovementInputThisSample;
 
-	if (bShouldApplyMovementInput && Value.X != 0.f)
+	if (Value.X != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::RightVector);
 		Pawn->AddMovementInput(MovementDirection, Value.X);
 	}
 
-	if (bShouldApplyMovementInput && Value.Y != 0.f)
+	if (Value.Y != 0.f)
 	{
 		const FVector MovementDirection = ControlRot.RotateVector(FVector::ForwardVector);
 		Pawn->AddMovementInput(MovementDirection, Value.Y);

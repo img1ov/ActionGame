@@ -62,6 +62,7 @@ public:
 	 * @param Rate Change to play the montage faster or slower
 	 * @param bStopWhenAbilityEnds If true, this montage will be aborted if the ability ends normally. It is always stopped when the ability is explicitly cancelled
 	 * @param AnimRootMotionTranslationScale Change to modify size of root motion or set to 0 to block it entirely
+	 * @param bApplyRootMotion If false, native montage root motion is disabled for this task
 	 */
 	UFUNCTION(BlueprintCallable, Category="Ability|Tasks", meta = (HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
 	static UAT_PlayMontageAndWaitForEvent* PlayMontageAndWaitForEvent(
@@ -72,7 +73,8 @@ public:
 		float Rate = 1.f,
 		FName StartSection = NAME_None,
 		bool bStopWhenAbilityEnds = true,
-		float AnimRootMotionTranslationScale = 1.f);
+		float AnimRootMotionTranslationScale = 1.f,
+		bool bApplyRootMotion = true);
 
 private:
 	/** Montage that is playing */
@@ -98,6 +100,13 @@ private:
 	/** Rather montage should be aborted if ability ends */
 	UPROPERTY()
 	bool bStopWhenAbilityEnds;
+
+	/** Whether this montage should use native root motion. */
+	UPROPERTY()
+	bool bApplyRootMotion = true;
+
+	/** True once native montage root motion has been disabled for this task. */
+	bool bPushedDisableRootMotion = false;
 
 	/** Checks if the ability is playing a montage and stops that montage, returns true if a montage was stopped, false if not. */
 	bool StopPlayingMontage();

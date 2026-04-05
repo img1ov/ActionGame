@@ -43,16 +43,8 @@ public:
 			HitReactImpulse.VisualDirection = static_cast<EImpactDirection>(VisualDirectionValue);
 		}
 
-		Ar << HitReactImpulse.Direction;
-		Ar << HitReactImpulse.Strength;
+		Ar << HitReactImpulse.ImpulseVelocity;
 		Ar << HitReactImpulse.Duration;
-
-		UObject* StrengthCurveObject = HitReactImpulse.StrengthCurve.Get();
-		Ar << StrengthCurveObject;
-		if (Ar.IsLoading())
-		{
-			HitReactImpulse.StrengthCurve = Cast<UCurveFloat>(StrengthCurveObject);
-		}
 
 		return bOutSuccess;
 	}

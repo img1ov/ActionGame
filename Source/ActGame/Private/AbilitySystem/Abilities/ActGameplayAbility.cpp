@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "AbilitySystem/Abilities/ActGameplayAbility.h"
@@ -237,6 +237,12 @@ void UActGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 		TriggerEventData ? *TriggerEventData->EventTag.ToString() : TEXT("None"));
 
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+
+	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
+	{
+		// The active ability owns the chain context; windows register against this context.
+		ActASC->BeginAbilityChain(*this, Handle);
+	}
 }
 
 void UActGameplayAbility::CancelAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateCancelAbility)
@@ -266,6 +272,13 @@ void UActGameplayAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, co
 		bReplicateEndAbility,
 		bWasCancelled,
 		GetAbilityLogTimeSeconds(ActorInfo));
+
+	if (UActAbilitySystemComponent* ActASC = GetActAbilitySystemComponentFromActorInfo())
+	{
+		// Release the chain context if this ability is the owner.
+		ActASC->EndAbilityChain(*this, Handle);
+	}
+
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
@@ -275,3 +288,6 @@ void UActGameplayAbility::OnGiveAbility(const FGameplayAbilityActorInfo* ActorIn
 
 	TryActivateAbilityOnSpawn(ActorInfo, Spec);
 }
+
+
+

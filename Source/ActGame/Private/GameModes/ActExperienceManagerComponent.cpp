@@ -184,7 +184,7 @@ const UActExperienceDefinition* UActExperienceManagerComponent::GetCurrentExperi
 
 bool UActExperienceManagerComponent::IsExperienceLoaded() const
 {
-	return CurrentExperience != nullptr;
+	return (LoadState == EActExperienceLoadState::Loaded) && (CurrentExperience != nullptr);
 }
 
 void UActExperienceManagerComponent::OnRep_CurrentExperience()
@@ -383,7 +383,7 @@ void UActExperienceManagerComponent::OnExperienceFullLoadCompleted()
 	FGameFeatureActivatingContext Context;
 
 	// Only apply to our specific world context if set
-	const FWorldContext* ExistingWorldContext = GEngine->GetWorldContextFromWorld(GetWorld());
+	FWorldContext* ExistingWorldContext = GEngine->GetWorldContextFromWorld(GetWorld());
 	if (ExistingWorldContext)
 	{
 		Context.SetRequiredWorldContextHandle(ExistingWorldContext->ContextHandle);

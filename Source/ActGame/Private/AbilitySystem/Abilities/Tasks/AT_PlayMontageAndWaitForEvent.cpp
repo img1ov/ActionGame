@@ -7,6 +7,25 @@
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemLog.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
+namespace
+{
+void DisableNativeRootMotionIfNeeded(UAnimInstance* AnimInstance, UAnimMontage* Montage, bool& bOutPushedDisableRootMotion)
+{
+	if (bOutPushedDisableRootMotion || !AnimInstance || !Montage)
+	{
+		return;
+	}
+
+	if (FAnimMontageInstance* MontageInstance = AnimInstance->GetActiveInstanceForMontage(Montage))
+	{
+		MontageInstance->PushDisableRootMotion();
+		bOutPushedDisableRootMotion = true;
+	}
+}
+}
 
 UAT_PlayMontageAndWaitForEvent::UAT_PlayMontageAndWaitForEvent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -30,8 +49,10 @@ void UAT_PlayMontageAndWaitForEvent::OnMontageBlendingOut(UAnimMontage* Montage,
 
 			// Reset AnimRootMotionTranslationScale
 			ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
-			if (Character && (Character->GetLocalRole() == ROLE_Authority ||
-							  (Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted)))
+			if (bApplyRootMotion &&
+				Character &&
+				(Character->GetLocalRole() == ROLE_Authority ||
+				 (Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted)))
 			{
 				Character->SetAnimRootMotionTranslationScale(1.f);
 			}
@@ -94,7 +115,7 @@ void UAT_PlayMontageAndWaitForEvent::OnGameplayEvent(FGameplayTag EventTag, cons
 }
 
 UAT_PlayMontageAndWaitForEvent* UAT_PlayMontageAndWaitForEvent::PlayMontageAndWaitForEvent(UGameplayAbility* OwningAbility,
-	FName TaskInstanceName, UAnimMontage* MontageToPlay, FGameplayTagContainer EventTags, float Rate, FName StartSection, bool bStopWhenAbilityEnds, float AnimRootMotionTranslationScale)
+	FName TaskInstanceName, UAnimMontage* MontageToPlay, FGameplayTagContainer EventTags, float Rate, FName StartSection, bool bStopWhenAbilityEnds, float AnimRootMotionTranslationScale, bool bApplyRootMotion)
 {
 	UAbilitySystemGlobals::NonShipping_ApplyGlobalAbilityScaler_Rate(Rate);
 
@@ -105,6 +126,7 @@ UAT_PlayMontageAndWaitForEvent* UAT_PlayMontageAndWaitForEvent::PlayMontageAndWa
 	MyObj->StartSection = StartSection;
 	MyObj->AnimRootMotionTranslationScale = AnimRootMotionTranslationScale;
 	MyObj->bStopWhenAbilityEnds = bStopWhenAbilityEnds;
+	MyObj->bApplyRootMotion = bApplyRootMotion;
 
 	return MyObj;
 }
@@ -145,12 +167,16 @@ void UAT_PlayMontageAndWaitForEvent::Activate()
 				AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, MontageToPlay);
 
 				ACharacter* Character = Cast<ACharacter>(GetAvatarActor());
-				if (Character && (Character->GetLocalRole() == ROLE_Authority ||
-								  (Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted)))
+				if (!bApplyRootMotion)
+				{
+					DisableNativeRootMotionIfNeeded(AnimInstance, MontageToPlay, bPushedDisableRootMotion);
+				}
+				
+				if (bApplyRootMotion && Character && (Character->GetLocalRole() == ROLE_Authority || (Character->GetLocalRole() == ROLE_AutonomousProxy && Ability->GetNetExecutionPolicy() == EGameplayAbilityNetExecutionPolicy::LocalPredicted)))
 				{
 					Character->SetAnimRootMotionTranslationScale(AnimRootMotionTranslationScale);
 				}
-
+				
 				bPlayedMontage = true;
 			}
 		}
@@ -207,6 +233,21 @@ void UAT_PlayMontageAndWaitForEvent::OnDestroy(bool AbilityEnded)
 	if (ActAbilitySystemComponent)
 	{
 		ActAbilitySystemComponent->RemoveGameplayEventTagContainerDelegate(EventTags, EventHandle);
+	}
+
+	if (bPushedDisableRootMotion && Ability)
+	{
+		if (const FGameplayAbilityActorInfo* ActorInfo = Ability->GetCurrentActorInfo())
+		{
+			if (UAnimInstance* AnimInstance = ActorInfo->GetAnimInstance())
+			{
+				if (FAnimMontageInstance* MontageInstance = AnimInstance->GetActiveInstanceForMontage(MontageToPlay))
+				{
+					MontageInstance->PopDisableRootMotion();
+				}
+			}
+		}
+		bPushedDisableRootMotion = false;
 	}
 
 	Super::OnDestroy(AbilityEnded);

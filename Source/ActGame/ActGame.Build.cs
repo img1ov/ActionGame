@@ -45,7 +45,6 @@ public class ActGame : ModuleRules
                 "Hotfix",
                 "CommonLoadingScreen",
                 "Niagara",
-                "ComboGraph",
                 "ControlFlows",
                 "PropertyPath",
                 "StateTreeModule",

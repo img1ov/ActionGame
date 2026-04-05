@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "GameplayTagContainer.h"
 #include "Components/PawnComponent.h"
 #include "Engine/EngineTypes.h"
 
@@ -9,6 +10,7 @@
 
 #define UE_API ACTGAME_API
 
+class UActAbilitySystemComponent;
 class AActor;
 /**
  * Component that centralizes battle-related state and routing.
@@ -27,6 +29,9 @@ class UActBattleComponent : public UPawnComponent
 public:
 	
 	UE_API UActBattleComponent(const FObjectInitializer& ObjectInitializer);
+	
+	void InitializeWithAbilitySystem(UActAbilitySystemComponent* InASC);
+	void UninitializeFromAbilitySystem();
 
 	/** Unified entry point for lock-on acquisition, routes to server/client internally. */
 	UFUNCTION(BlueprintCallable, Category = "Act|Battle")
@@ -45,9 +50,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Act|Battle")
 	bool HasLockOnTarget() const { return CurrentLockOnTarget != nullptr; }
+	
+	void OnFloatingTagChanged(const FGameplayTag Tag, int32 NewCount);
 
 protected:
-	
 	virtual void OnRegister() override;
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -67,12 +73,19 @@ private:
 
 	void SetLockOnRequested(bool bRequested);
 	void SetLockOnTarget(AActor* NewTarget);
+	/** Notify character movement about lock-on strafe state changes. */
+	void NotifyLockOnStrafeState(bool bRequested);
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetLockOnRequested(bool bRequested);
 
 	UFUNCTION()
 	void OnRep_LockOnTarget(AActor* OldTarget);
+	
+protected:
+	
+	UPROPERTY()
+	TObjectPtr<UActAbilitySystemComponent> AbilitySystemComponent;
 
 private:
 	

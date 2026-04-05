@@ -4,7 +4,9 @@
 #include "Character/ActBattleComponent.h"
 
 #include "ActGameplayTags.h"
+#include "ActLogChannels.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Character/ActCharacterMovementComponent.h"
 #include "CollisionQueryParams.h"
 #include "Engine/CollisionProfile.h"
 #include "CollisionShape.h"
@@ -13,8 +15,10 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameplayTagAssetInterface.h"
+#include "Character/ActCharacter.h"
 #include "Engine/OverlapResult.h"
 #include "Net/UnrealNetwork.h"
+#include "AbilitySystem/ActAbilitySystemComponent.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ActBattleComponent)
 
@@ -30,6 +34,47 @@ UActBattleComponent::UActBattleComponent(const FObjectInitializer& ObjectInitial
 	LockOnRange = 1500.0f;
 	LockOnRefreshInterval = 0.15f;
 	PrimaryComponentTick.TickInterval = LockOnRefreshInterval;
+}
+
+void UActBattleComponent::InitializeWithAbilitySystem(UActAbilitySystemComponent* InASC)
+{
+	AActor* Owner = GetOwner();
+	check(Owner);
+	
+	if (AbilitySystemComponent)
+	{
+		UE_LOG(LogAct, Error, TEXT("UActBattleComponent: Battle component for owner [%s] has already been initialized with an ability system."), *GetNameSafe(Owner));
+		return;
+	}
+
+	AbilitySystemComponent = InASC;
+	if (!AbilitySystemComponent)
+	{
+		UE_LOG(LogAct, Error, TEXT("UActBattleComponent: Cannot initialize battle component for owner [%s] with NULL ability system."), *GetNameSafe(Owner));
+		return;
+	}
+	
+	AbilitySystemComponent->RegisterGameplayTagEvent(ActGameplayTags::Status_Floating, EGameplayTagEventType::NewOrRemoved).AddUObject(this, &ThisClass::OnFloatingTagChanged);
+}
+
+void UActBattleComponent::UninitializeFromAbilitySystem()
+{
+	AbilitySystemComponent = nullptr;
+}
+
+void UActBattleComponent::OnFloatingTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+	const AActCharacter* ActCharacter = Cast<AActCharacter>(GetOwner());
+	if (!ActCharacter) return;
+	
+	if (NewCount > 0)
+	{
+		ActCharacter->GetActMovementComponent()->StartFloating();
+	}
+	else
+	{
+		ActCharacter->GetActMovementComponent()->StopFloating();
+	}
 }
 
 void UActBattleComponent::OnRegister()
@@ -142,6 +187,7 @@ void UActBattleComponent::SetLockOnRequested(const bool bRequested)
 
 	bLockOnRequested = bRequested;
 	UpdateLockOnTickState();
+	NotifyLockOnStrafeState(bRequested);
 }
 
 void UActBattleComponent::SetLockOnTarget(AActor* NewTarget)
@@ -159,6 +205,18 @@ void UActBattleComponent::SetLockOnTarget(AActor* NewTarget)
 		if (PawnToUpdate->HasAuthority())
 		{
 			PawnToUpdate->ForceNetUpdate();
+		}
+	}
+}
+
+void UActBattleComponent::NotifyLockOnStrafeState(const bool bRequested)
+{
+	// Lock-on only toggles facing behavior on the movement component; input/movement direction stays controller-driven.
+	if (APawn* Pawn = GetPawn<APawn>())
+	{
+		if (UActCharacterMovementComponent* ActMoveComp = UActCharacterMovementComponent::ResolveActMovementComponent(Pawn))
+		{
+			ActMoveComp->SetLockOnStrafeActive(bRequested);
 		}
 	}
 }
